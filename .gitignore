@@ -1,0 +1,34 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Supabase local
+supabase/.temp/
+supabase/.branches/
+
+# Deno
+.deno/
+
+# Node
+node_modules/
+
+# Build / generated
+dist/
+build/
+coverage/
+
+# Logs / temporary
+*.log
+*.tmp
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
