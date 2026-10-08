@@ -11,14 +11,14 @@ Deno.serve(async (req) => {
     const supabase = serviceClient();
     const userId = await requireAuth(req, supabase);
     const postId = parseInt(new URL(req.url).pathname.split("/")[2], 10);
-    if (!postId) return json({ message: "Invalid post id." }, 422);
+    if (!postId) return json({ message: "Invalid story id." }, 422);
 
     const result = await markStoryViewed(supabase, postId, userId);
     if ("notFound" in result) return json({ message: "Not found." }, 404);
     if ("notAStory" in result) return json({ message: "Not a story." }, 422);
-    if ("expired" in result) return json({ message: "This story has expired." }, 410);
+    if ("expired" in result) return json({ message: "Story expired." }, 410);
 
-    return json({ message: "Viewed." });
+    return json({ ok: true });
   } catch (err) {
     if (err instanceof AuthError) return json({ message: err.message }, err.status);
     console.error(err);

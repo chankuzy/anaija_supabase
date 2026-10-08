@@ -1,9 +1,13 @@
 /// <reference path="../_shared/deno-shim.d.ts" />
 import { serviceClient, requireAuth, AuthError } from "../_shared/auth.ts";
 import { json, handleCors } from "../_shared/response.ts";
+import { resolveAvatarUrl } from "../_shared/avatar.ts";
 
 const USERNAME_REGEX = /^[a-zA-Z0-9_]+$/;
-const ALLOWED_FIELDS = ["name", "username", "bio", "location", "links", "institution_id", "faculty", "level", "campus_role"] as const;
+// NEW: "tagline" added — the short quote under the cover photo. Plain text,
+// same shape as bio, so it slots straight into the existing allow-list.
+const ALLOWED_FIELDS = ["name", "username", "bio", "tagline", "location", "links", "institution_id", "faculty", "level", "campus_role"] as const;
+const TAGLINE_MAX_LEN = 80;
 
 Deno.serve(async (req) => {
   const cors = handleCors(req);
@@ -29,6 +33,12 @@ Deno.serve(async (req) => {
     if (body.links !== undefined && body.links !== null) {
       if (!Array.isArray(body.links) || body.links.length > 5) {
         return json({ message: "Links must be an array of up to 5 URLs." }, 422);
+      }
+    }
+
+    if (body.tagline !== undefined && body.tagline !== null) {
+      if (typeof body.tagline !== "string" || body.tagline.length > TAGLINE_MAX_LEN) {
+        return json({ message: `Tagline must be ${TAGLINE_MAX_LEN} characters or fewer.` }, 422);
       }
     }
 
@@ -72,7 +82,9 @@ async function fullProfile(supabase: any, user: any) {
   return {
     id: user.id, name: user.name, username: user.username, email: user.email, phone: user.phone,
     bio: user.bio,
-    avatar: user.avatar ? (user.avatar.startsWith("http") ? user.avatar : (await supabase.storage.from(Deno.env.get("STORAGE_BUCKET") ?? "media").createSignedUrl(user.avatar, 3600)).data?.signedUrl ?? null) : null,
+    tagline: user.tagline ?? null, // NEW
+    avatar: resolveAvatarUrl(user.avatar_key ?? user.avatar),
+    cover: resolveAvatarUrl(user.cover_key ?? user.cover_url), // NEW — same resolver, R2 doesn't care which field it's called
     location: user.location, links: user.links ?? [],
     is_verified: user.is_verified, campus_verified: user.campus_verified,
     profile_completed: user.profile_completed, provider: user.provider,

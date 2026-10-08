@@ -1,6 +1,7 @@
 /// <reference path="../_shared/deno-shim.d.ts" />
 import { serviceClient, requireAuth, AuthError, SupabaseClient } from "../_shared/auth.ts";
 import { json, handleCors } from "../_shared/response.ts";
+import { resolveAvatarUrl } from "../_shared/avatar.ts";
 
 Deno.serve(async (req) => {
   const cors = handleCors(req);
@@ -42,7 +43,9 @@ async function formatFullProfile(supabase: SupabaseClient, user: any, unreadCoun
     email: user.email,
     phone: user.phone,
     bio: user.bio,
-    avatar: user.avatar ? (user.avatar.startsWith("http") ? user.avatar : (await supabase.storage.from(Deno.env.get("STORAGE_BUCKET") ?? "media").createSignedUrl(user.avatar, 3600)).data?.signedUrl ?? null) : null,
+    tagline: user.tagline ?? null, // NEW
+    avatar: resolveAvatarUrl(user.avatar_key ?? user.avatar),
+    cover: resolveAvatarUrl(user.cover_key ?? user.cover_url), // NEW
     location: user.location,
     links: user.links ?? [],
     is_verified: user.is_verified,

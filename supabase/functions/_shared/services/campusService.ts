@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "../auth.ts";
 import { formatPost } from "./feedService.ts";
+import { batchAttachAudio } from "./audioAssetService.ts";
 
 const PAGE_SIZE = 20;
 
@@ -28,6 +29,7 @@ export async function getCampusFeed(supabase: SupabaseClient, institutionId: num
   const hasMore = (rows?.length ?? 0) > PAGE_SIZE;
   const page = (rows ?? []).slice(0, PAGE_SIZE);
 
+  await batchAttachAudio(supabase, page);
   const { data: liked } = await supabase.from("post_likes").select("post_id").eq("user_id", userId).in("post_id", page.map((p: any) => p.id));
   const likedSet = new Set((liked ?? []).map((r: any) => r.post_id));
 
@@ -59,6 +61,7 @@ export async function getEvents(supabase: SupabaseClient, institutionId: number 
   const { data, error } = await query;
   if (error) throw error;
 
+  await batchAttachAudio(supabase, data ?? []);
   const posts = await Promise.all((data ?? []).map((p: any) => formatPost(supabase, p, cdnBase)));
   return { data: posts };
 }
@@ -80,6 +83,7 @@ export async function getAnnouncements(supabase: SupabaseClient, institutionId: 
   const { data, error } = await query;
   if (error) throw error;
 
+  await batchAttachAudio(supabase, data ?? []);
   const posts = await Promise.all((data ?? []).map((p: any) => formatPost(supabase, p, cdnBase)));
   return { data: posts };
 }

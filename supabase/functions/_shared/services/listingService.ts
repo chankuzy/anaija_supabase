@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "../auth.ts";
 import { createNotification } from "./notificationService.ts";
 import { formatListing, getLikedIds, getBookmarkedIds } from "./feedService.ts";
+import { resolveAvatarUrl } from "../avatar.ts";
 
 export const TYPE_LISTING_INQUIRY = "listing_inquiry";
 
@@ -145,9 +146,15 @@ export async function listInquiries(supabase: SupabaseClient, postId: number, us
   const check = await requireOwnedListing(supabase, postId, userId);
   if ("notFound" in check || "unauthorized" in check) return check;
 
+  // FIX: added `avatar` to the buyer select, and the avatar below now
+  // goes through resolveAvatarUrl() with the avatar_key ?? avatar
+  // fallback like everywhere else — was avatar_key-only before, and
+  // built the URL by hand (`${cdnBase}/${avatar_key}`) instead of using
+  // the shared resolver, so it also couldn't handle a buyer whose
+  // avatar_key happens to already be a full http URL.
   const { data, error } = await supabase
     .from("listing_inquiries")
-    .select("*, buyer:users!listing_inquiries_buyer_id_foreign(id, name, username, avatar_key), conversation:conversations(*)")
+    .select("*, buyer:users!listing_inquiries_buyer_id_foreign(id, name, username, avatar_key, avatar), conversation:conversations(*)")
     .eq("post_id", postId)
     .order("created_at", { ascending: false })
     .limit(20);
@@ -163,7 +170,7 @@ export async function listInquiries(supabase: SupabaseClient, postId: number, us
       conversation_id: i.conversation_id,
       buyer: i.buyer ? {
         id: i.buyer.id, name: i.buyer.name, username: i.buyer.username,
-        avatar: i.buyer.avatar_key ? `${cdnBase}/${i.buyer.avatar_key}` : null,
+        avatar: resolveAvatarUrl(i.buyer.avatar_key ?? i.buyer.avatar),
       } : null,
     })),
   };
@@ -172,9 +179,12 @@ export async function listInquiries(supabase: SupabaseClient, postId: number, us
 // ─── Show single listing ───────────────────────────────────────────────────
 
 export async function getListing(supabase: SupabaseClient, postId: number, viewerId: number, cdnBase: string) {
+  // FIX: added `avatar` — was avatar_key only, so opening a listing
+  // detail page for any user without a custom-uploaded avatar showed no
+  // seller avatar at all.
   const { data: post, error } = await supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key), media:post_media(*), listingDetail:listing_details(*)")
+    .select("*, user:users(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*)")
     .eq("id", postId).maybeSingle();
 
   if (error) throw error;

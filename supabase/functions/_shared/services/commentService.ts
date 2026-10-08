@@ -65,6 +65,9 @@ export async function listComments(supabase: SupabaseClient, postId: number, vie
 
 // ─── Create comment / reply ──────────────────────────────────────────────
 
+
+const PAGE_SIZE = 20;
+
 export async function createComment(
   supabase: SupabaseClient,
   postId: number,
@@ -80,6 +83,8 @@ export async function createComment(
   if (!post) return { notFound: true as const };
   if (post.type === "story") return { storiesNotAllowed: true as const };
   if (!post.allow_comments) return { disabled: true as const };
+
+  const label = post.type === "listing" ? "listing" : "post";
 
   let parent = null;
   if (parentId) {
@@ -100,23 +105,32 @@ export async function createComment(
     await supabase.from("posts").update({ comments_count: (post.comments_count ?? 0) + 1 }).eq("id", postId);
   }
 
+  // Body stays a clean action line — the full comment text rides along
+  // separately via comment_id -> comment_body (fetched in
+  // notificationDisplayService), so the client can render it as its own
+  // styled block rather than baking it into the notification sentence.
   if (post.user_id !== userId) {
     await createNotification(supabase, {
       userId: post.user_id, actorId: userId, type: TYPE_COMMENT,
       notifiableType: "posts", notifiableId: postId,
-      body: `${userName} commented: "${truncate(body)}"`,
+      body: `${userName} commented on your ${label}.`,
+      commentId: comment.id,
     });
   }
 
+  // FIX: was notifiableType "comments" — meant reply notifications never got
+  // a post attached in listNotifications (posts are only batched for
+  // notifiable_type "posts"), so they showed no image and tapping one fell
+  // back to the actor's profile instead of opening the post/comment.
   if (parent && parent.user_id !== userId && parent.user_id !== post.user_id) {
     await createNotification(supabase, {
       userId: parent.user_id, actorId: userId, type: TYPE_COMMENT,
-      notifiableType: "comments", notifiableId: parent.id,
+      notifiableType: "posts", notifiableId: postId,
       body: `${userName} replied to your comment.`,
+      commentId: comment.id,
     });
   }
 
-  // A freshly created comment can never already be liked.
   return { comment: formatComment(comment, cdnBase, new Set()) };
 }
 
@@ -188,4 +202,37 @@ export async function toggleCommentLike(supabase: SupabaseClient, userId: number
   const newCount = (comment.likes_count ?? 0) + 1;
   await supabase.from("comments").update({ likes_count: newCount }).eq("id", commentId);
   return { liked: true, likes_count: newCount };
+}
+
+// ─── Locate ───────────────────────────────────────────────────────────────
+// Given any comment id (top-level or a reply), resolves which top-level
+// comment should be scrolled-to/highlighted in the sheet (a reply resolves
+// to its parent, since the sheet only renders top-level comments), and its
+// 0-indexed rank in the sheet's actual sort order (likes_count desc, id
+// desc) so the client knows how many pages to fetch before it's loaded.
+export async function locateComment(supabase: SupabaseClient, postId: number, commentId: number) {
+  const { data: target, error } = await supabase
+    .from("comments").select("id, parent_id, likes_count").eq("id", commentId).maybeSingle();
+  if (error) throw error;
+  if (!target) return { notFound: true as const };
+
+  let topLevel = target;
+  if (target.parent_id) {
+    const { data: parent, error: pErr } = await supabase
+      .from("comments").select("id, likes_count").eq("id", target.parent_id).maybeSingle();
+    if (pErr) throw pErr;
+    if (!parent) return { notFound: true as const };
+    topLevel = parent;
+  }
+
+  const { count, error: cErr } = await supabase
+    .from("comments")
+    .select("*", { count: "exact", head: true })
+
+    .eq("post_id", postId)
+    .is("parent_id", null)
+    .or(`likes_count.gt.${topLevel.likes_count},and(likes_count.eq.${topLevel.likes_count},id.gt.${topLevel.id})`);
+  if (cErr) throw cErr;
+
+  return { top_level_id: topLevel.id, position: count ?? 0, is_reply: !!target.parent_id };
 }

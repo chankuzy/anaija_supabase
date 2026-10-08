@@ -3,8 +3,6 @@ import { serviceClient, requireAuth, AuthError } from "../_shared/auth.ts";
 import { json, handleCors } from "../_shared/response.ts";
 import { listNotifications } from "../_shared/services/notificationDisplayService.ts";
 
-const CDN_BASE = Deno.env.get("CDN_BASE_URL") ?? "";
-
 Deno.serve(async (req) => {
   const cors = handleCors(req);
   if (cors) return cors;
@@ -13,8 +11,7 @@ Deno.serve(async (req) => {
     const supabase = serviceClient();
     const userId = await requireAuth(req, supabase);
     const page = parseInt(new URL(req.url).searchParams.get("page") ?? "1", 10);
-
-    return json(await listNotifications(supabase, userId, page, CDN_BASE));
+    return json(await listNotifications(supabase, userId, page));
   } catch (err) {
     if (err instanceof AuthError) return json({ message: err.message }, err.status);
     console.error(err);

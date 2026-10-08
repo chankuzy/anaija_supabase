@@ -16,7 +16,7 @@ Deno.serve(async (req) => {
     const q = url.searchParams.get("q") ?? "";
     const type = url.searchParams.get("type");
 
-    if (!q.trim()) return json({ posts: [], users: [] });
+    if (!q.trim()) return json({ posts: [], listings: [], users: [] });
 
     return json(await search(supabase, q, type, userId, CDN_BASE));
   } catch (err) {

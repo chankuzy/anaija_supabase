@@ -1,31 +1,23 @@
 import type { SupabaseClient } from "../auth.ts";
+import { batchAttachAudio } from "./audioAssetService.ts";
+import { resolveAvatarUrl } from "../avatar.ts";
 
 const PAGE_SIZE = 15;
 const MARKETPLACE_PAGE_SIZE = 20;
 
-// ─── Public media URL construction ─────────────────────────────────────────
-// No signed URLs on the read path. Buckets must be PUBLIC (see note at
-// bottom of file). CDN_BASE_URL, when set, is preferred — that's the R2/
-// Cloudflare front door once the storage migration lands. Until then this
-// falls back to Supabase's own public object URL, which needs no signing
-// call and is stable/cacheable by definition.
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const STORAGE_BUCKET = Deno.env.get("STORAGE_BUCKET") ?? "media";
-const AVATARS_BUCKET = Deno.env.get("AVATARS_BUCKET") ?? "avatars";
-const CDN_BASE = Deno.env.get("CDN_BASE_URL") ?? "";
 
 function publicUrl(bucket: string, key: string | null | undefined): string | null {
   if (!key) return null;
   if (key.startsWith("http://") || key.startsWith("https://")) return key;
-
   const cleanKey = key.replace(/^\/+/, "");
-
-  if (CDN_BASE) {
-    return `${CDN_BASE.replace(/\/+$/, "")}/${cleanKey}`;
+  const cdnBase = Deno.env.get("CDN_BASE_URL") ?? "";
+  if (cdnBase) {
+    return `${cdnBase.replace(/\/+$/, "")}/${cleanKey}`;
   }
-
-  if (!SUPABASE_URL) return null;
-  return `${SUPABASE_URL.replace(/\/+$/, "")}/storage/v1/object/public/${bucket}/${cleanKey}`;
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  if (!supabaseUrl) return null;
+  return `${supabaseUrl.replace(/\/+$/, "")}/storage/v1/object/public/${bucket}/${cleanKey}`;
 }
 
 export async function formatAuthor(
@@ -36,8 +28,18 @@ export async function formatAuthor(
 ) {
   if (!user) return null;
 
-  const rawKey = user.avatar_key ?? user.avatar_url ?? user.avatar;
-  const avatar = publicUrl(AVATARS_BUCKET, rawKey);
+  // FIX: was resolving via publicUrl() against a dedicated AVATARS_BUCKET
+  // that nothing ever actually uploads to, and every caller of this
+  // function selected only `avatar_key` on the user join — so the
+  // `?? user.avatar` fallback below had nothing to fall back to, it was
+  // always undefined. Now uses the same shared resolver every other
+  // avatar read goes through, and the selects below (getFeedPage,
+  // getMarketplaceFeed, getStoriesForUser) include `avatar` so the
+  // fallback actually has data to work with for users who've never
+  // uploaded a custom avatar (avatar_key null, avatar = their Google/
+  // social-auth photo URL).
+  const rawKey = user.avatar_key ?? user.avatar;
+  const avatar = resolveAvatarUrl(rawKey);
 
   return {
     id: user.id,
@@ -80,10 +82,23 @@ export async function formatPost(
     formatAuthor(supabase, post.user, cdnBase, isFollowing),
   ]);
 
+  const audioAsset = post._audioAsset ?? post.audioAsset?.[0] ?? null;
+  const audio = audioAsset
+    ? {
+        enabled: post.audio_config?.enabled ?? true,
+        name: audioAsset.name,
+        url: publicUrl(STORAGE_BUCKET, audioAsset.storage_key),
+        duration_ms: audioAsset.duration_ms,
+        start_ms: post.audio_config?.start_ms ?? 0,
+        playback_duration_ms: post.audio_config?.playback_duration_ms ?? audioAsset.duration_ms,
+      }
+    : { enabled: false };
+
   return {
     id: post.id,
     type: post.type,
     subtype: post.subtype,
+    pinned_at: post.pinned_at ?? null,
     caption: post.caption,
     video_url: post.video_key ? (post.video_key.startsWith("http") ? post.video_key : `${cdnBase}/${post.video_key}`) : null,
     thumbnail_url: post.thumbnail_key ? `${cdnBase}/${post.thumbnail_key}` : null,
@@ -104,7 +119,7 @@ export async function formatPost(
     author,
     media,
     slideshow: post.slideshow_config ?? { enabled: false, interval_ms: 2800, transition: 'fade' },
-    audio: post.audio_config ?? { enabled: false },
+    audio,
   };
 }
 
@@ -159,6 +174,18 @@ export async function formatStory(
     formatAuthor(supabase, post.user, cdnBase, false),
   ]);
 
+  const audioAsset = post._audioAsset ?? post.audioAsset?.[0] ?? null;
+  const audio = audioAsset
+    ? {
+        enabled: true,
+        name: audioAsset.name,
+        url: publicUrl(STORAGE_BUCKET, audioAsset.storage_key),
+        duration_ms: audioAsset.duration_ms,
+        start_ms: post.audio_config?.start_ms ?? 0,
+        playback_duration_ms: post.audio_config?.playback_duration_ms ?? audioAsset.duration_ms,
+      }
+    : { enabled: false };
+
   const seen = Array.isArray(post.storyViews) ? post.storyViews.length > 0 : false;
 
   return {
@@ -167,6 +194,7 @@ export async function formatStory(
     expires_at: post.expires_at,
     seen,
     media,
+    audio,
     author,
     created_at: post.created_at,
   };
@@ -181,9 +209,10 @@ export async function getFeedPage(supabase: SupabaseClient, userId: number, curs
 
   const visibleUserIds = [...new Set([userId, ...followingIds])];
 
+  // FIX: added `avatar` — see formatAuthor's comment above.
   let query = supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key), media:post_media(*), listingDetail:listing_details(*)")
+    .select("*, user:users(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*)")
     .eq("processing_status", "ready")
     .eq("is_active", true)
     .in("type", ["post", "story", "listing"])
@@ -201,6 +230,8 @@ export async function getFeedPage(supabase: SupabaseClient, userId: number, curs
 
   const hasMore = (posts?.length ?? 0) > PAGE_SIZE;
   const page = (posts ?? []).slice(0, PAGE_SIZE);
+
+  await batchAttachAudio(supabase, page);
 
   const postIds = page.map((p: any) => p.id);
   const [likedSet, bookmarkedSet] = await Promise.all([
@@ -267,9 +298,10 @@ export async function getMarketplaceFeed(
 ) {
   const cursorId = opts.cursor ? parseInt(atob(opts.cursor), 10) : Number.MAX_SAFE_INTEGER;
 
+  // FIX: added `avatar` — see formatAuthor's comment above.
   let query = supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key, institution_id), media:post_media(*), listingDetail:listing_details!inner(*)")
+    .select("*, user:users(id, name, username, avatar_key, avatar, institution_id), media:post_media(*), listingDetail:listing_details!inner(*)")
     .eq("type", "listing")
     .eq("is_active", true)
     .eq("listingDetail.status", "available")
@@ -306,6 +338,8 @@ export async function getMarketplaceFeed(
 
   const hasMore = (rows?.length ?? 0) > MARKETPLACE_PAGE_SIZE;
   const page = (rows ?? []).slice(0, MARKETPLACE_PAGE_SIZE);
+
+  await batchAttachAudio(supabase, page);
 
   const authorIds = [...new Set(page.map((p: any) => p.user_id))];
   const postIds = page.map((p: any) => p.id);
@@ -349,9 +383,10 @@ export async function getStoriesForUser(supabase: SupabaseClient, userId: number
   const followingIds = (follows ?? []).map((f: any) => f.following_id);
   const authorIds = [...new Set([userId, ...followingIds])];
 
+  // FIX: added `avatar` — see formatAuthor's comment above.
   const { data: stories, error } = await supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key), media:post_media(*), storyViews:story_views(user_id)")
+    .select("*, user:users(id, name, username, avatar_key, avatar), media:post_media(*), storyViews:story_views(user_id)")
     .eq("type", "story")
     .eq("is_active", true)
     .gt("expires_at", new Date().toISOString())
@@ -359,6 +394,22 @@ export async function getStoriesForUser(supabase: SupabaseClient, userId: number
     .order("created_at", { ascending: false });
 
   if (error) throw error;
+
+  await batchAttachAudio(supabase, stories ?? []);
+
+  // Which of these stories has the viewer liked? One query for the whole
+  // list instead of one per story. Story likes live in post_likes like any
+  // other post's (see interactionService.toggleLike).
+  const likedIds = new Set<number>();
+  const storyIds = (stories ?? []).map((s: any) => s.id);
+  if (storyIds.length) {
+    const { data: likes } = await supabase
+      .from("post_likes")
+      .select("post_id")
+      .eq("user_id", userId)
+      .in("post_id", storyIds);
+    for (const l of likes ?? []) likedIds.add(l.post_id);
+  }
 
   const grouped = new Map<number, any[]>();
   for (const s of stories ?? []) {
@@ -390,7 +441,12 @@ export async function getStoriesForUser(supabase: SupabaseClient, userId: number
       return {
         author,
         has_unseen: hasUnseen,
-        stories: formattedStories,
+        // Promise.all preserves order, so formattedStories[i] is userStories[i].
+        stories: formattedStories.map((fs: any, i: number) => ({
+          ...fs,
+          likes_count: userStories[i].likes_count ?? 0,
+          is_liked: likedIds.has(userStories[i].id),
+        })),
       };
     }),
   );

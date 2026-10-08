@@ -2,6 +2,8 @@
 import { serviceClient, requireAuth, AuthError } from "../_shared/auth.ts";
 import { json, handleCors } from "../_shared/response.ts";
 import { createPost, ValidationError } from "../_shared/services/postService.ts";
+import { broadcastStoryChange } from "../_shared/services/storyService.ts";
+import { notifyFollowersOfPost } from "../_shared/services/notificationService.ts";
 
 Deno.serve(async (req) => {
   const cors = handleCors(req);
@@ -16,6 +18,25 @@ Deno.serve(async (req) => {
     if (error) throw error;
 
     const post = await createPost(supabase, userId, user, body);
+
+    // Live stories row: followers (and the author's other devices) refetch
+    // the moment a story lands. Awaited so the edge runtime doesn't cut the
+    // request off mid-fan-out; broadcastStoryChange never throws.
+    if (post.type === "story") {
+      await broadcastStoryChange(supabase, userId, "created", post.id);
+    }
+
+    // Opt-in "notify me" followers. Stories are excluded (they have their
+    // own ring). Posts still processing (video) are notified when they
+    // flip to ready, not here.
+    if (post.type !== "story" && post.processing_status === "ready") {
+      await notifyFollowersOfPost(supabase, {
+        authorId: userId,
+        authorName: user.name ?? "Someone",
+        postId: post.id,
+        label: post.type === "listing" ? "listing" : "post",
+      });
+    }
 
     return json({
       post_id: post.id,

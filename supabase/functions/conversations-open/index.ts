@@ -15,6 +15,7 @@ Deno.serve(async (req) => {
     if (!otherId) return json({ message: "user_id is required." }, 422);
 
     const result = await openDirect(supabase, myId, otherId);
+    if ("blocked" in result) return json({ message: "You can't message this user." }, 403);
     if ("selfConversation" in result) return json({ message: "Cannot start a conversation with yourself." }, 422);
     if ("notFound" in result) return json({ message: "User not found." }, 422);
 

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "../auth.ts";
 import { syncHashtags } from "./hashtagService.ts";
+import { batchAttachAudio } from "./audioAssetService.ts";
 
 export const TYPE_POST = "post";
 export const TYPE_STORY = "story";
@@ -8,9 +9,6 @@ export const TYPE_LISTING = "listing";
 const LISTING_TYPES = ["product", "service", "business", "rental", "wanted"];
 const CONDITION_TYPES = ["new", "like_new", "good", "fair", "poor"];
 
-// R2's public dev URL — same value as CDN_BASE_URL, kept as its own env
-// var here so this ownership check doesn't depend on feedService's export
-// shape and can be reasoned about on its own.
 const R2_PUBLIC_URL = Deno.env.get("R2_PUBLIC_URL") ?? Deno.env.get("CDN_BASE_URL") ?? "";
 
 export class ValidationError extends Error {
@@ -68,20 +66,10 @@ interface CreatePostInput {
   longitude?: number;
   media?: MediaInput[];
   slideshow?: { enabled: boolean; interval_ms: number; transition: string };
-  audio?: { enabled: boolean; title?: string; artist?: string; start_ms?: number; playback_duration_ms?: number };
+  audio_asset_id?: number;
+  audio?: { enabled: boolean; start_ms?: number; playback_duration_ms?: number };
 }
 
-// ─── Storage ownership check ────────────────────────────────────────────────
-// Every uploaded path is namespaced "{userId}/{uuid}.ext" by storage-sign-upload,
-// so ownership is provable from the path prefix alone. We additionally confirm
-// the object was actually uploaded (not just a guessed/forged path) via a HEAD
-// request against R2's public URL. R2 is a public bucket (same as the read
-// path), so no signing is needed here, just a cheap existence check.
-//
-// Previously this ran one HEAD request at a time in a nested for-loop — for a
-// 5-image gallery that's up to 10 sequential round-trips serialized into
-// publish latency for no reason, since none of these checks depend on each
-// other. Now every key across every media item is checked in parallel.
 async function verifyMediaOwnership(supabase: SupabaseClient, userId: number, media: MediaInput[]) {
   if (!R2_PUBLIC_URL) {
     throw new Error("R2_PUBLIC_URL is not configured — cannot verify media ownership.");
@@ -121,6 +109,18 @@ export async function createPost(supabase: SupabaseClient, userId: number, user:
   if (type === TYPE_LISTING) validateListing(input);
   if (input.media?.length) await verifyMediaOwnership(supabase, userId, input.media);
 
+  // ── AUDIO ASSET OWNERSHIP ENFORCEMENT ──
+  if (input.audio_asset_id) {
+    const { data: asset, error: assetErr } = await supabase
+      .from("audio_assets")
+      .select("id, user_id")
+      .eq("id", input.audio_asset_id)
+      .maybeSingle();
+    if (assetErr) throw assetErr;
+    if (!asset) throw new ValidationError({ audio_asset_id: "Audio asset not found." });
+    if (asset.user_id !== userId) throw new ValidationError({ audio_asset_id: "You do not own this audio asset." });
+  }
+
   const postData: Record<string, unknown> = {
     user_id: userId,
     type,
@@ -132,10 +132,10 @@ export async function createPost(supabase: SupabaseClient, userId: number, user:
     hashtags: input.hashtags ?? [],
     visibility: input.visibility ?? "public",
     is_active: true,
-    // Nothing async happens server-side anymore — client hands us finished media.
     processing_status: "ready",
     video_key: "",
     slideshow_config: input.slideshow ?? null,
+    audio_asset_id: input.audio_asset_id ?? null,
     audio_config: input.audio ?? null,
   };
 
@@ -183,7 +183,6 @@ export async function createPost(supabase: SupabaseClient, userId: number, user:
         blurhash: m.blurhash ?? null,
         dominant_color: m.dominant_color ?? null,
         aspect_ratio: m.aspect_ratio ?? null,
-        // Already final — client did the processing. No pipeline to wait on.
         processing_status: "ready",
         optimized: true,
         sort_order: i,
@@ -196,8 +195,6 @@ export async function createPost(supabase: SupabaseClient, userId: number, user:
     await createListingDetail(supabase, post.id, input);
   }
 
-  // Extension point: fan-out to followers' feeds, search indexing, etc.
-  // Deliberately not built yet — see earlier note on deferred Redis/queue work.
   if (input.hashtags?.length) {
     await syncHashtags(supabase, input.hashtags);
   }
@@ -249,17 +246,27 @@ async function createListingDetail(supabase: SupabaseClient, postId: number, inp
   if (error) throw error;
 }
 
-// ─── show / update / delete: unchanged from before ──────────────────────────
-
 export async function getPost(supabase: SupabaseClient, postId: number, viewerId: number) {
+  // FIX: added `avatar` — was avatar_key only, so a single-post view
+  // (share links, notifications deep-link, etc) came back with no
+  // author avatar for anyone who hasn't uploaded a custom one.
   const { data: post, error } = await supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key), media:post_media(*)")
+    .select("*, user:users(id, name, username, avatar_key, avatar), media:post_media(*)")
     .eq("id", postId)
     .maybeSingle();
 
   if (error) throw error;
   if (!post || !post.is_active || post.processing_status !== "ready") return { notFound: true as const };
+
+  // FIX: the inline audioAsset:audio_assets(*) join that used to live in
+  // the .select() above did not reliably resolve (no auto-detectable FK
+  // relationship) and silently returned nothing rather than erroring —
+  // every post came back with audio.enabled=false regardless of whether
+  // it actually had audio attached. batchAttachAudio is the same helper
+  // every list endpoint (feed, users-posts, etc) already uses; a
+  // single-element array is just this endpoint's equivalent of that.
+  await batchAttachAudio(supabase, [post]);
 
   if (post.type === TYPE_STORY && post.expires_at && new Date(post.expires_at) < new Date()) {
     return { expired: true as const };
@@ -288,6 +295,22 @@ export async function updatePost(supabase: SupabaseClient, postId: number, userI
   for (const field of ["caption", "allow_comments", "visibility", "hashtags"]) {
     if (input[field] !== undefined) updates[field] = input[field];
   }
+
+  // ── AUDIO ASSET OWNERSHIP ON UPDATE ──
+  if (input.audio_asset_id !== undefined) {
+    if (input.audio_asset_id !== null) {
+      const { data: asset } = await supabase
+        .from("audio_assets")
+        .select("user_id")
+        .eq("id", input.audio_asset_id as number)
+        .maybeSingle();
+      if (!asset) throw new ValidationError({ audio_asset_id: "Audio asset not found." });
+      if (asset.user_id !== userId) throw new ValidationError({ audio_asset_id: "Unauthorized." });
+    }
+    updates.audio_asset_id = input.audio_asset_id;
+  }
+  if (input.audio !== undefined) updates.audio_config = input.audio;
+
   if (Object.keys(updates).length) await supabase.from("posts").update(updates).eq("id", postId);
 
   if (post.type === TYPE_LISTING) {
