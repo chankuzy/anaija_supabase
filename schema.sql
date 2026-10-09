@@ -246,6 +246,7 @@ CREATE TABLE public.post_media (
   audio_duration numeric,
   created_at timestamp without time zone DEFAULT now(),
   updated_at timestamp without time zone DEFAULT now(),
+  purged_at timestamp with time zone,
   CONSTRAINT post_media_pkey PRIMARY KEY (id),
   CONSTRAINT post_media_post_id_foreign FOREIGN KEY (post_id) REFERENCES public.posts(id)
 );
@@ -600,4 +601,38 @@ CREATE TABLE public.user_blocks (
   CONSTRAINT user_blocks_pkey PRIMARY KEY (id),
   CONSTRAINT user_blocks_blocker_id_fkey FOREIGN KEY (blocker_id) REFERENCES public.users(id),
   CONSTRAINT user_blocks_blocked_id_fkey FOREIGN KEY (blocked_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.reports (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  user_id bigint NOT NULL,
+  category text NOT NULL CHECK (category = ANY (ARRAY['bug'::text, 'account'::text, 'marketplace'::text, 'safety'::text, 'suggestion'::text])),
+  message text NOT NULL,
+  status text NOT NULL DEFAULT 'open'::text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT reports_pkey PRIMARY KEY (id),
+  CONSTRAINT reports_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.media_deletions (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  storage_key text NOT NULL UNIQUE,
+  source text NOT NULL CHECK (source = ANY (ARRAY['expired_story'::text, 'deleted_post'::text, 'orphan'::text, 'audio_asset'::text, 'replaced_avatar'::text, 'replaced_cover'::text])),
+  status text NOT NULL DEFAULT 'pending'::text CHECK (status = ANY (ARRAY['pending'::text, 'deleted'::text, 'failed'::text, 'skipped'::text])),
+  attempts integer NOT NULL DEFAULT 0,
+  last_error text,
+  skip_reason text,
+  size_bytes bigint,
+  eligible_at timestamp with time zone NOT NULL DEFAULT now(),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  deleted_at timestamp with time zone,
+  CONSTRAINT media_deletions_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.storage_cleanup_runs (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  started_at timestamp with time zone NOT NULL DEFAULT now(),
+  finished_at timestamp with time zone,
+  dry_run boolean NOT NULL,
+  stats jsonb,
+  error text,
+  CONSTRAINT storage_cleanup_runs_pkey PRIMARY KEY (id)
 );

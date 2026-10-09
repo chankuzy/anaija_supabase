@@ -5,13 +5,19 @@ import { resolveAvatarUrl } from "../avatar.ts";
 const PAGE_SIZE = 15;
 const MARKETPLACE_PAGE_SIZE = 20;
 
+// Content types that may appear as items in the primary /feed.
+// Stories are deliberately NOT here: they are temporary, live in the
+// dedicated stories tray (getStoriesForUser / stories-index), and must
+// never be candidates for the ranked feed. Product decision, Oct 2026.
+const FEED_TYPES = ["post", "listing"];
+
 const STORAGE_BUCKET = Deno.env.get("STORAGE_BUCKET") ?? "media";
 
 function publicUrl(bucket: string, key: string | null | undefined): string | null {
   if (!key) return null;
   if (key.startsWith("http://") || key.startsWith("https://")) return key;
   const cleanKey = key.replace(/^\/+/, "");
-  const cdnBase = Deno.env.get("CDN_BASE_URL") ?? "";
+  const cdnBase = Deno.env.get("R2_PUBLIC_URL") ?? Deno.env.get("CDN_BASE_URL") ?? "";
   if (cdnBase) {
     return `${cdnBase.replace(/\/+$/, "")}/${cleanKey}`;
   }
@@ -200,28 +206,103 @@ export async function formatStory(
   };
 }
 
-export async function getFeedPage(supabase: SupabaseClient, userId: number, cursor: string | null, cdnBase: string) {
-  const cursorId = cursor ? parseInt(atob(cursor), 10) : Number.MAX_SAFE_INTEGER;
+// ─── Feed cursor ────────────────────────────────────────────────────────────
+//
+// for_you is ordered by (engagement_score DESC, id DESC), so its cursor has to
+// be that same pair — a bare id cursor ("id < last") is only correct when the
+// ordering is by id, and otherwise skips and repeats rows. following/campus
+// are ordered by id alone and keep the original id-only cursor format.
+//
+// Wire formats (both base64, opaque to the client):
+//   id-only : btoa("123")
+//   keyset  : btoa('{"i":123,"s":4.5}')
+// A legacy id-only cursor arriving on for_you (an app session that started
+// before this deploy) degrades to the old "id < N" behaviour for that one page.
+interface FeedCursor {
+  id: number;
+  score?: number;
+}
+
+function decodeFeedCursor(raw: string | null): FeedCursor | null {
+  if (!raw) return null;
+  try {
+    const decoded = atob(raw);
+    if (/^\d+$/.test(decoded)) return { id: parseInt(decoded, 10) };
+    const parsed = JSON.parse(decoded);
+    if (parsed && Number.isFinite(parsed.i)) {
+      return { id: Number(parsed.i), score: Number.isFinite(parsed.s) ? Number(parsed.s) : undefined };
+    }
+  } catch {
+    // malformed cursor — fall through and treat as "first page"
+  }
+  return null;
+}
+
+function encodeKeysetCursor(row: { id: number; engagement_score?: number | string | null }): string {
+  const s = Number(row.engagement_score ?? 0);
+  return btoa(JSON.stringify({ i: row.id, s: Number.isFinite(s) ? s : 0 }));
+}
+
+export async function getFeedPage(
+  supabase: SupabaseClient,
+  userId: number,
+  cursor: string | null,
+  cdnBase: string,
+  scope: string = "for_you"
+) {
+  const cur = decodeFeedCursor(cursor);
+  const cursorId = cur?.id ?? Number.MAX_SAFE_INTEGER;
 
   const { data: follows } = await supabase.from("follows").select("following_id").eq("follower_id", userId);
   const followingIds = (follows ?? []).map((f: any) => f.following_id);
   const followingSet = new Set<number>(followingIds);
 
-  const visibleUserIds = [...new Set([userId, ...followingIds])];
+  if (scope === "following" && followingIds.length === 0) {
+    return { posts: [], next_cursor: null, has_more: false };
+  }
 
+  // Candidate boundary. Everything the feed may ever show must pass ALL of:
+  //   - type in FEED_TYPES        → stories are never candidates
+  //   - expires_at IS NULL        → only stories carry expires_at today
+  //                                 (postService.createPost); belt-and-braces
+  //                                 so a mis-typed expiring row can't leak.
+  //                                 If expiring posts/listings are ever added,
+  //                                 replace this with an expiry-aware filter.
+  //   - is_active / deleted_at    → soft-deleted posts (postService.deletePost)
+  //   - processing_status = ready → unpublished / still processing
+  // These are applied in SQL, before LIMIT, so pages stay full and the cursor
+  // stays correct — no post-fetch filtering.
   // FIX: added `avatar` — see formatAuthor's comment above.
   let query = supabase
     .from("posts")
     .select("*, user:users(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*)")
     .eq("processing_status", "ready")
     .eq("is_active", true)
-    .in("type", ["post", "story", "listing"])
-    .lt("id", cursorId)
+    .is("deleted_at", null)
+    .is("expires_at", null)
+    .in("type", FEED_TYPES)
     .limit(PAGE_SIZE + 1);
 
-  if (followingIds.length) {
-    query = query.in("user_id", visibleUserIds).order("id", { ascending: false });
+  let keyset = false;
+
+  if (scope === "following") {
+    query = query.in("user_id", followingIds).lt("id", cursorId).order("id", { ascending: false });
+  } else if (scope === "campus") {
+    const { data: user } = await supabase.from("users").select("institution_id").eq("id", userId).maybeSingle();
+    query = query.lt("id", cursorId);
+    if (user?.institution_id) {
+      query = query.or(`context->>institution_id.eq.${user.institution_id},visibility.eq.public`).order("id", { ascending: false });
+    } else {
+      query = query.order("id", { ascending: false });
+    }
   } else {
+    keyset = true;
+    if (cur?.score !== undefined) {
+      // rows strictly after (score, id) in (score DESC, id DESC) order
+      query = query.or(`engagement_score.lt.${cur.score},and(engagement_score.eq.${cur.score},id.lt.${cur.id})`);
+    } else if (cur) {
+      query = query.lt("id", cur.id); // legacy id-only cursor
+    }
     query = query.order("engagement_score", { ascending: false }).order("id", { ascending: false });
   }
 
@@ -261,9 +342,15 @@ export async function getFeedPage(supabase: SupabaseClient, userId: number, curs
     ),
   );
 
+  let nextCursor: string | null = null;
+  if (hasMore && page.length) {
+    const last = page[page.length - 1];
+    nextCursor = keyset ? encodeKeysetCursor(last) : btoa(String(last.id));
+  }
+
   return {
     posts: formattedPosts,
-    next_cursor: hasMore && page.length ? btoa(String(page[page.length - 1].id)) : null,
+    next_cursor: nextCursor,
     has_more: hasMore,
   };
 }

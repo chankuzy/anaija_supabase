@@ -17,7 +17,8 @@ Deno.serve(async (req) => {
     const t1 = performance.now();
 
     const cursor = new URL(req.url).searchParams.get("cursor");
-    const result = await getFeedPage(supabase, userId, cursor, CDN_BASE);
+    const scope = new URL(req.url).searchParams.get("scope") ?? "for_you";
+    const result = await getFeedPage(supabase, userId, cursor, CDN_BASE, scope);
     const t2 = performance.now();
 
     console.log(`[timing] auth: ${(t1 - t0).toFixed(1)}ms | getFeedPage: ${(t2 - t1).toFixed(1)}ms | total: ${(t2 - t0).toFixed(1)}ms | posts_returned: ${result.posts.length}`);

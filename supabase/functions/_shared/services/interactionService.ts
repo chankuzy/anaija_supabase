@@ -74,7 +74,7 @@ export async function listBookmarks(supabase: SupabaseClient, userId: number, ty
 
   if (error) throw error;
 
-  const rows = (data ?? []).filter((b: any) => b.post?.is_active && (!type || b.post.type === type));
+  const rows = (data ?? []).filter((b: any) => b.post?.is_active && b.post.type !== "story" && (!type || b.post.type === type));
   const hasMore = rows.length > perPage;
 
   return { rows: rows.slice(0, perPage), hasMore };

@@ -233,7 +233,7 @@ export async function sendMessage(
   if ("blocked" in gate) return { blocked: true as const };
   if ("requestLimitReached" in gate) return { requestLimitReached: true as const };
 
-  const selectClause = `*, sender:users!messages_sender_id_foreign(id, name, username, avatar_key, avatar)`;
+  const selectClause = `*, sender:users!messages_sender_id_foreign(id, name, username, avatar_key, avatar), sharedPost:posts(*, user:users(id, name, username, avatar_key, avatar), listingDetail:listing_details(*), media:post_media(*))`;
 
   if (input.client_temp_id) {
     const { data: existing } = await supabase
@@ -289,7 +289,9 @@ export async function sendMessage(
     .single();
 
   const lastMessageAt = new Date().toISOString();
-  const previewBody = message.body ?? `[${message.type}]`;
+  const previewBody = message.body ?? (message.type === "post_share"
+    ? (message.sharedPost?.type === "listing" ? "Shared a listing" : "Shared a post")
+    : `[${message.type}]`);
 
   await supabase.from("conversations").update({
     last_message_body: previewBody,
@@ -456,7 +458,7 @@ export async function deleteMessage(supabase: SupabaseClient, conversationId: nu
     if (ageMinutes > 5) return { tooLate: true as const };
 
     await supabase.from("messages").update({
-      body: null, media_key: null, deleted_at: new Date().toISOString(),
+      body: null, media_key: null, shared_post_id: null, deleted_at: new Date().toISOString(),
     }).eq("id", messageId);
 
     await broadcastToConversation(supabase, conversationId, "message_deleted", { message_id: messageId });
@@ -478,6 +480,7 @@ function formatMessage(m: any) {
     conversation_id: m.conversation_id,
     type: m.type,
     body: m.body,
+    is_deleted: !!m.deleted_at,
     client_temp_id: m.client_temp_id ?? null,
     media_url: resolveAvatarUrl(m.media_key),
     media_type: m.media_type,
@@ -494,16 +497,25 @@ function formatMessage(m: any) {
 
 function formatSharedPost(post: any) {
   const detail = Array.isArray(post.listingDetail) ? post.listingDetail[0] : post.listingDetail;
-  const images = (post.media ?? []).filter((med: any) => med.media_type === "image");
-  const first = images[0];
+  const media = (post.media ?? []).slice().sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  const visual = media.filter((med: any) => med.media_type === "image" || med.media_type === "video");
+  const first = visual[0];
+  const isVideo = first?.media_type === "video";
 
-  const image = first ? resolveAvatarUrl(first.thumbnail_key || first.storage_key) : null;
+  const imageKey = first
+    ? (first.thumbnail_key || (first.media_type === "image" ? first.storage_key : null))
+    : null;
+  const image = resolveAvatarUrl(imageKey || post.thumbnail_key || null);
 
   return {
     id: post.id,
     type: post.type,
+    subtype: post.subtype ?? null,
     caption: post.caption,
     image,
+    is_video: isVideo,
+    media_count: visual.length,
+    unavailable: !post.is_active || !!post.deleted_at,
     author: post.user ? {
       name: post.user.name,
       username: post.user.username,

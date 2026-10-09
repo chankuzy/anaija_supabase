@@ -22,9 +22,21 @@ Deno.serve(async (req) => {
     if ("expired" in fetchResult) return json({ message: "This story has expired." }, 410);
 
     const { post, isLiked, isBookmarked } = fetchResult;
+
+    let isFollowing = false;
+    if (post.user_id !== userId) {
+      const { count } = await supabase
+        .from("follows")
+        .select("*", { count: "exact", head: true })
+        .eq("follower_id", userId)
+        .eq("following_id", post.user_id);
+      isFollowing = (count ?? 0) > 0;
+    }
+
+
     const formatted = post.type === "listing"
-      ? await formatListing(supabase, post, CDN_BASE)
-      : await formatPost(supabase, post, CDN_BASE, isLiked, isBookmarked);
+      ? await formatListing(supabase, post, CDN_BASE, isFollowing, isLiked, isBookmarked)
+      : await formatPost(supabase, post, CDN_BASE, isLiked, isBookmarked, isFollowing);
 
     return json(formatted);
   } catch (err) {

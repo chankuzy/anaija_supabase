@@ -263,7 +263,10 @@ async function nearby(
       .from("posts")
       .select("*, user:users(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*)")
       .in("id", ids)
-      .eq("is_active", true);
+      .eq("is_active", true)
+      .eq("processing_status", "ready")
+      .is("expires_at", null)
+      .in("type", ["post", "listing"]);
     if (error) throw error;
 
     const normalized = (postRows ?? []).map((p: any) => ({

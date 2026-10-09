@@ -208,7 +208,7 @@ export async function getUserLikedPosts(supabase: SupabaseClient, userId: number
   const page = (likeRows ?? [])
     .slice(0, PAGE_SIZE)
     .map((r: any) => ({ ...r.post, listingDetail: r.post?.listingDetail?.[0] ?? r.post?.listingDetail }))
-    .filter((p: any) => p && p.is_active);
+    .filter((p: any) => p && p.is_active && p.type !== "story");
 
   await batchAttachAudio(supabase, page);
   return { page, hasMore };
