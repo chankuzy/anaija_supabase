@@ -71,3 +71,7 @@ Run 01 and 02 and paste the verify/test output. Then write migration 03 (candida
   - DECISION: no people-dismiss endpoint. Impressions/open/follow/dismiss all go through /feed-events (suggestion_* kinds, validated in feed_ingest_events); trg_feed_follow stamps followed_at.
   - Suggestion units never repeat a person within a session (provider reads earlier units from feed_sessions). Weak wide-only candidates are suppressed by people.min_score (0.15).
   - Next: verify with real users, then posts-share -> 'share' event, then Phase 7 Flutter.
+- 2026-10-14: Phase 6 backend: migration 05 (feed_people_candidates + 'people' config + follows indexes), _shared/feed/people.ts (scorePeople, pickGroup, peopleProvider), people_test.ts, feed/index.ts wired with peopleProvider.
+  - DECISION: no people-dismiss endpoint. Impressions/open/follow/dismiss all go through /feed-events (suggestion_* kinds, validated in feed_ingest_events); trg_feed_follow stamps followed_at.
+  - Suggestion units never repeat a person within a session (provider reads earlier units from feed_sessions). Weak wide-only candidates are suppressed by people.min_score (0.15).
+  - Next: verify with real users, then posts-share -> 'share' event, then Phase 7 Flutter.
