@@ -67,3 +67,7 @@ Run 01 and 02 and paste the verify/test output. Then write migration 03 (candida
   - Known limits: concurrent identical page requests may both compute (advanceSession guard makes only one count as a delivery); rebuild batches don't enforce author gap across the boundary.
   - Open: remove legacy fallback in feed/index.ts once stable; remove dev-login; rewrite posts-share to emit a 'share' event; /campus-feed still legacy (Flutter moves to /feed?scope=campus in Phase 7).
   - Next: Phase 6 people engine (migration 05: candidate SQL + people provider), then posts-share + users-follow/dismiss wiring, then Phase 7 Flutter.
+- 2026-10-14: Phase 6 backend: migration 05 (feed_people_candidates + 'people' config + follows indexes), _shared/feed/people.ts (scorePeople, pickGroup, peopleProvider), people_test.ts, feed/index.ts wired with peopleProvider.
+  - DECISION: no people-dismiss endpoint. Impressions/open/follow/dismiss all go through /feed-events (suggestion_* kinds, validated in feed_ingest_events); trg_feed_follow stamps followed_at.
+  - Suggestion units never repeat a person within a session (provider reads earlier units from feed_sessions). Weak wide-only candidates are suppressed by people.min_score (0.15).
+  - Next: verify with real users, then posts-share -> 'share' event, then Phase 7 Flutter.

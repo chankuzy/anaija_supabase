@@ -2,6 +2,7 @@
 import { serviceClient, requireAuth, AuthError } from "../_shared/auth.ts";
 import { json, handleCors } from "../_shared/response.ts";
 import { getFeed, type Scope } from "../_shared/feed/engine.ts";
+import { peopleProvider } from "../_shared/feed/people.ts";
 import { getFeedPage } from "../_shared/services/feedService.ts";
 
 const CDN_BASE = Deno.env.get("CDN_BASE_URL") ?? "";
@@ -25,6 +26,7 @@ Deno.serve(async (req) => {
     const { body } = await getFeed({
       supabase, viewerId: userId, scope: scope as Scope, cursor,
       refresh: q.get("refresh") === "1", cdnBase: CDN_BASE,
+      peopleProvider,
     });
     console.log(`[feed] user=${userId} scope=${scope} items=${(body.items as unknown[]).length} caught_up=${body.caught_up} reset=${body.cursor_reset} ${(performance.now() - t0).toFixed(0)}ms`);
     const res = json(body);

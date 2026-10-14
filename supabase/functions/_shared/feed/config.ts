@@ -38,6 +38,11 @@ export interface FeedConfig {
     topics_per_post: number;
   };
   candidates: Record<string, number | Record<string, number>>;
+  people: {
+    limit: number; window_days: number; dismiss_days: number; cooldown_days: number;
+    fatigue_shown: number; fatigue_days: number; small_followers: number; min_score: number; jitter: number;
+    weights: { mutual: number; interest: number; campus: number; emerging: number; quality: number; activity: number; wide: number };
+  };
   compose: {
     page_size: number; session_items: number; first_n_familiar: number;
     max_author_per_page: number; min_author_gap: number; max_run_format: number;
@@ -82,6 +87,11 @@ export const DEFAULT_CONFIG: FeedConfig = {
     neg_topic_score: -1.5, creator_factor: 1.0, format_factor: 0.5, inst_factor: 0.5, topics_per_post: 8,
   },
   candidates: {},
+  people: {
+    limit: 40, window_days: 30, dismiss_days: 60, cooldown_days: 3, fatigue_shown: 4, fatigue_days: 14,
+    small_followers: 25, min_score: 0.15, jitter: 0.02,
+    weights: { mutual: 0.30, interest: 0.24, campus: 0.14, emerging: 0.10, quality: 0.10, activity: 0.06, wide: 0.06 },
+  },
   compose: {
     page_size: 15, session_items: 60, first_n_familiar: 3,
     max_author_per_page: 2, min_author_gap: 4, max_run_format: 3,
