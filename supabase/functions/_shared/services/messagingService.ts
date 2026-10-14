@@ -1,7 +1,6 @@
 import type { SupabaseClient } from "../auth.ts";
 import { broadcastToConversation, broadcastToUser } from "./realtimeService.ts";
 import { resolveAvatarUrl } from "../avatar.ts";
-import { notifyMessage } from "./notificationService.ts";
 import { isBlockedEitherWay, getFollowStatus } from "./blockService.ts";
 
 const PAGE_SIZE = 30;
@@ -314,16 +313,6 @@ export async function sendMessage(
       unread_count: newUnreadCount,
     });
 
-    if (!p.is_muted) {
-      await notifyMessage(supabase, {
-        conversationId,
-        senderId: userId,
-        senderName: message.sender?.name ?? "Someone",
-        recipientId: p.user_id,
-        message: { body: message.body, type: message.type },
-        conversationTitle: conv?.type !== "direct" ? conv?.title ?? null : null,
-      });
-    }
   }
 
   const formatted = formatMessage(await withReplyTo(supabase, message));

@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "../auth.ts";
-import { formatPost } from "./feedService.ts";
+import { formatPost, batchAttachReposted } from "./feedService.ts";
 import { batchAttachAudio } from "./audioAssetService.ts";
 
 const PAGE_SIZE = 20;
@@ -30,10 +30,28 @@ export async function getCampusFeed(supabase: SupabaseClient, institutionId: num
   const page = (rows ?? []).slice(0, PAGE_SIZE);
 
   await batchAttachAudio(supabase, page);
+  await batchAttachReposted(supabase, userId, page);
   const { data: liked } = await supabase.from("post_likes").select("post_id").eq("user_id", userId).in("post_id", page.map((p: any) => p.id));
   const likedSet = new Set((liked ?? []).map((r: any) => r.post_id));
 
-  const posts = await Promise.all(page.map((p: any) => formatPost(supabase, p, cdnBase, likedSet.has(p.id))));
+  // Which of these authors does the viewer follow? Without this every author
+  // came back is_following=false, so followed users showed a Follow button.
+  const authorIds = [...new Set(page.map((p: any) => p.user?.id ?? p.user_id).filter(Boolean))];
+  const followingSet = new Set<number>();
+  if (authorIds.length > 0) {
+    const { data: follows } = await supabase
+      .from("follows")
+      .select("following_id")
+      .eq("follower_id", userId)
+      .in("following_id", authorIds);
+    for (const f of follows ?? []) followingSet.add(f.following_id);
+  }
+
+  const posts = await Promise.all(
+    page.map((p: any) =>
+      formatPost(supabase, p, cdnBase, likedSet.has(p.id), false, followingSet.has(p.user?.id ?? p.user_id)),
+    ),
+  );
 
   return {
     posts,

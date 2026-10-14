@@ -75,6 +75,15 @@ export async function formatMedia(supabase: SupabaseClient, media: any) {
   };
 }
 
+/** Tags each row with _reposted (did the viewer repost it?) in one query. */
+export async function batchAttachReposted(supabase: SupabaseClient, userId: number, rows: any[]) {
+  const ids = rows.map((r: any) => r.id);
+  if (!ids.length) return;
+  const { data } = await supabase.from("reposts").select("post_id").eq("user_id", userId).in("post_id", ids);
+  const set = new Set((data ?? []).map((r: any) => r.post_id));
+  for (const r of rows) r._reposted = set.has(r.id);
+}
+
 export async function formatPost(
   supabase: SupabaseClient,
   post: any,
@@ -117,8 +126,11 @@ export async function formatPost(
     bookmarks_count: post.bookmarks_count ?? 0,
     is_liked: isLiked,
     is_bookmarked: isBookmarked,
+    is_reposted: post._reposted ?? false,
     allow_comments: post.allow_comments,
     allow_duet: post.allow_duet,
+    // Effective value: the post's own switch, else the author's account setting.
+    allow_story_sharing: post.allow_story_sharing ?? post.user?.allow_story_sharing ?? null,
     visibility: post.visibility,
     hashtags: post.hashtags ?? [],
     created_at: post.created_at,
@@ -169,6 +181,39 @@ export async function formatListing(
   return { ...base, listing_type: post.listing_type ?? "product", listing };
 }
 
+/** A story made via "add to story" remembers its origin in context.source_post_id. */
+async function loadStorySource(supabase: SupabaseClient, post: any) {
+  let ctx = post.context;
+  if (ctx === undefined) {
+    const { data } = await supabase.from("posts").select("context").eq("id", post.id).maybeSingle();
+    ctx = data?.context;
+  }
+  const sid = ctx?.source_post_id;
+  if (!Number.isInteger(sid)) return null;
+
+  const { data: sp } = await supabase
+    .from("posts")
+    .select("id, type, caption, is_active, deleted_at, listingDetail:listing_details(*)")
+    .eq("id", sid)
+    .maybeSingle();
+  if (!sp || !sp.is_active || sp.deleted_at) return null;
+
+  const d = Array.isArray(sp.listingDetail) ? sp.listingDetail[0] : sp.listingDetail;
+  return {
+    id: sp.id,
+    type: sp.type,
+    caption: sp.caption ?? null,
+    listing: d ? {
+      formatted_price: (d.price_minor / 100).toLocaleString(),
+      currency: d.currency,
+      price_type: d.price_type,
+      status: d.status,
+      condition: d.condition,
+      business_name: d.business_name,
+    } : null,
+  };
+}
+
 export async function formatStory(
   supabase: SupabaseClient,
   post: any,
@@ -203,6 +248,7 @@ export async function formatStory(
     audio,
     author,
     created_at: post.created_at,
+    source_post: await loadStorySource(supabase, post),
   };
 }
 
@@ -275,7 +321,7 @@ export async function getFeedPage(
   // FIX: added `avatar` — see formatAuthor's comment above.
   let query = supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*)")
+    .select("*, user:users(id, name, username, avatar_key, avatar, allow_story_sharing), media:post_media(*), listingDetail:listing_details(*)")
     .eq("processing_status", "ready")
     .eq("is_active", true)
     .is("deleted_at", null)
@@ -313,6 +359,7 @@ export async function getFeedPage(
   const page = (posts ?? []).slice(0, PAGE_SIZE);
 
   await batchAttachAudio(supabase, page);
+  await batchAttachReposted(supabase, userId, page);
 
   const postIds = page.map((p: any) => p.id);
   const [likedSet, bookmarkedSet] = await Promise.all([
@@ -388,7 +435,7 @@ export async function getMarketplaceFeed(
   // FIX: added `avatar` — see formatAuthor's comment above.
   let query = supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key, avatar, institution_id), media:post_media(*), listingDetail:listing_details!inner(*)")
+    .select("*, user:users(id, name, username, avatar_key, avatar, institution_id, allow_story_sharing), media:post_media(*), listingDetail:listing_details!inner(*)")
     .eq("type", "listing")
     .eq("is_active", true)
     .eq("listingDetail.status", "available")
@@ -503,6 +550,9 @@ export async function getStoriesForUser(supabase: SupabaseClient, userId: number
     if (!grouped.has(s.user_id)) grouped.set(s.user_id, []);
     grouped.get(s.user_id)!.push(s);
   }
+  // Groups keep newest-activity-first order (Map insertion order); inside a
+  // group, stories play oldest-first.
+  for (const arr of grouped.values()) arr.reverse();
 
   const groups = await Promise.all(
     Array.from(grouped.entries()).map(async ([_authorId, userStories]) => {

@@ -37,6 +37,9 @@ CREATE TABLE public.users (
   cover_key text,
   cover_url text,
   tagline text,
+  allow_story_sharing boolean NOT NULL DEFAULT true,
+  feed_start_muted boolean NOT NULL DEFAULT false,
+  feed_autoplay_video boolean NOT NULL DEFAULT true,
   CONSTRAINT users_pkey PRIMARY KEY (id),
   CONSTRAINT 1 FOREIGN KEY (institution_id) REFERENCES public.institutions(id)
 );
@@ -149,10 +152,15 @@ CREATE TABLE public.posts (
   audio_asset_id bigint,
   community_id bigint,
   pinned_at timestamp with time zone,
+  client_request_id uuid,
+  allow_story_sharing boolean,
+  public_since timestamp with time zone,
+  institution_id bigint,
   CONSTRAINT posts_pkey PRIMARY KEY (id),
   CONSTRAINT posts_user_id_foreign FOREIGN KEY (user_id) REFERENCES public.users(id),
   CONSTRAINT posts_audio_asset_id_fkey FOREIGN KEY (audio_asset_id) REFERENCES public.audio_assets(id),
-  CONSTRAINT posts_community_id_fkey FOREIGN KEY (community_id) REFERENCES public.communities(id)
+  CONSTRAINT posts_community_id_fkey FOREIGN KEY (community_id) REFERENCES public.communities(id),
+  CONSTRAINT posts_institution_id_fkey FOREIGN KEY (institution_id) REFERENCES public.institutions(id)
 );
 CREATE TABLE public.post_likes (
   id bigint NOT NULL DEFAULT nextval('post_likes_id_seq'::regclass),
@@ -216,6 +224,7 @@ CREATE TABLE public.follows (
   following_id bigint NOT NULL,
   created_at timestamp without time zone,
   updated_at timestamp without time zone,
+  notify_posts boolean NOT NULL DEFAULT false,
   CONSTRAINT follows_pkey PRIMARY KEY (id),
   CONSTRAINT follows_follower_id_foreign FOREIGN KEY (follower_id) REFERENCES public.users(id),
   CONSTRAINT follows_following_id_foreign FOREIGN KEY (following_id) REFERENCES public.users(id)
@@ -504,6 +513,7 @@ CREATE TABLE public.audio_assets (
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   source_start_ms integer NOT NULL DEFAULT 0,
+  client_request_id uuid,
   CONSTRAINT audio_assets_pkey PRIMARY KEY (id),
   CONSTRAINT audio_assets_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
 );
@@ -572,6 +582,7 @@ CREATE TABLE public.notification_preferences (
   quiet_hours_end smallint,
   timezone_offset_minutes integer NOT NULL DEFAULT 0,
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  hide_message_preview boolean NOT NULL DEFAULT false,
   CONSTRAINT notification_preferences_pkey PRIMARY KEY (user_id),
   CONSTRAINT notification_preferences_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
 );
@@ -635,4 +646,222 @@ CREATE TABLE public.storage_cleanup_runs (
   stats jsonb,
   error text,
   CONSTRAINT storage_cleanup_runs_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.activity_items (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  recipient_id bigint NOT NULL,
+  kind text NOT NULL,
+  group_key text NOT NULL,
+  target_kind text,
+  target_id bigint,
+  content_id bigint,
+  actor_count integer NOT NULL DEFAULT 0,
+  event_count integer NOT NULL DEFAULT 0,
+  target_count integer NOT NULL DEFAULT 0,
+  actors_preview ARRAY NOT NULL DEFAULT '{}'::bigint[],
+  targets_preview ARRAY NOT NULL DEFAULT '{}'::bigint[],
+  first_event_at timestamp with time zone NOT NULL,
+  last_event_at timestamp with time zone NOT NULL,
+  seen_at timestamp with time zone,
+  read_at timestamp with time zone,
+  closed_at timestamp with time zone,
+  retracted_at timestamp with time zone,
+  expires_at timestamp with time zone,
+  dismissed_at timestamp with time zone,
+  last_push_at timestamp with time zone,
+  last_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  last_comment_id bigint,
+  CONSTRAINT activity_items_pkey PRIMARY KEY (id),
+  CONSTRAINT activity_items_recipient_id_fkey FOREIGN KEY (recipient_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.activity_events (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  recipient_id bigint NOT NULL,
+  actor_id bigint,
+  kind text NOT NULL,
+  target_kind text NOT NULL,
+  target_id bigint,
+  content_id bigint,
+  comment_id bigint,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  dedupe_key text NOT NULL UNIQUE,
+  item_id bigint,
+  occurred_at timestamp with time zone NOT NULL DEFAULT now(),
+  retracted_at timestamp with time zone,
+  CONSTRAINT activity_events_pkey PRIMARY KEY (id),
+  CONSTRAINT activity_events_recipient_id_fkey FOREIGN KEY (recipient_id) REFERENCES public.users(id),
+  CONSTRAINT activity_events_actor_id_fkey FOREIGN KEY (actor_id) REFERENCES public.users(id),
+  CONSTRAINT activity_events_comment_id_fkey FOREIGN KEY (comment_id) REFERENCES public.comments(id),
+  CONSTRAINT activity_events_item_id_fkey FOREIGN KEY (item_id) REFERENCES public.activity_items(id)
+);
+CREATE TABLE public.activity_policy (
+  kind text NOT NULL,
+  merge boolean NOT NULL DEFAULT true,
+  window_secs integer NOT NULL DEFAULT 0,
+  max_life_secs integer NOT NULL DEFAULT 0,
+  restore_secs integer NOT NULL DEFAULT 0,
+  push_mode text NOT NULL DEFAULT 'each'::text CHECK (push_mode = ANY (ARRAY['each'::text, 'item'::text, 'none'::text])),
+  push_cooldown_secs integer NOT NULL DEFAULT 0,
+  CONSTRAINT activity_policy_pkey PRIMARY KEY (kind)
+);
+CREATE TABLE public.push_outbox (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  recipient_id bigint NOT NULL,
+  kind text NOT NULL,
+  item_id bigint,
+  event_id bigint,
+  conversation_id bigint,
+  message_id bigint,
+  collapse_key text NOT NULL,
+  status text NOT NULL DEFAULT 'pending'::text CHECK (status = ANY (ARRAY['pending'::text, 'sending'::text, 'sent'::text, 'suppressed'::text, 'retry'::text, 'dead'::text])),
+  attempts integer NOT NULL DEFAULT 0,
+  reason text,
+  last_error text,
+  next_attempt_at timestamp with time zone NOT NULL DEFAULT now(),
+  claimed_at timestamp with time zone,
+  sent_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT push_outbox_pkey PRIMARY KEY (id),
+  CONSTRAINT push_outbox_recipient_id_fkey FOREIGN KEY (recipient_id) REFERENCES public.users(id),
+  CONSTRAINT push_outbox_item_id_fkey FOREIGN KEY (item_id) REFERENCES public.activity_items(id),
+  CONSTRAINT push_outbox_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.activity_events(id)
+);
+CREATE TABLE public.user_activity_topics (
+  user_id bigint NOT NULL,
+  topic uuid NOT NULL DEFAULT gen_random_uuid(),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT user_activity_topics_pkey PRIMARY KEY (user_id),
+  CONSTRAINT user_activity_topics_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.activity_errors (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  at timestamp with time zone NOT NULL DEFAULT now(),
+  fn text,
+  error text,
+  detail jsonb,
+  CONSTRAINT activity_errors_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.feed_post_stats (
+  post_id bigint NOT NULL,
+  impressions integer NOT NULL DEFAULT 0,
+  views integer NOT NULL DEFAULT 0,
+  completions integer NOT NULL DEFAULT 0,
+  rewatches integer NOT NULL DEFAULT 0,
+  skips integer NOT NULL DEFAULT 0,
+  likes integer NOT NULL DEFAULT 0,
+  comments integer NOT NULL DEFAULT 0,
+  saves integer NOT NULL DEFAULT 0,
+  shares integer NOT NULL DEFAULT 0,
+  reposts integer NOT NULL DEFAULT 0,
+  follows_from integer NOT NULL DEFAULT 0,
+  negatives integer NOT NULL DEFAULT 0,
+  first_exposed_at timestamp with time zone,
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  delivered integer NOT NULL DEFAULT 0,
+  CONSTRAINT feed_post_stats_pkey PRIMARY KEY (post_id),
+  CONSTRAINT feed_post_stats_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.posts(id)
+);
+CREATE TABLE public.feed_exposures (
+  user_id bigint NOT NULL,
+  post_id bigint NOT NULL,
+  first_seen_at timestamp with time zone NOT NULL DEFAULT now(),
+  last_seen_at timestamp with time zone NOT NULL DEFAULT now(),
+  seen_count smallint NOT NULL DEFAULT 1,
+  best_outcome smallint NOT NULL DEFAULT 0,
+  negative boolean NOT NULL DEFAULT false,
+  src text,
+  acts smallint NOT NULL DEFAULT 0,
+  CONSTRAINT feed_exposures_pkey PRIMARY KEY (user_id, post_id),
+  CONSTRAINT feed_exposures_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT feed_exposures_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.posts(id)
+);
+CREATE TABLE public.feed_events (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  user_id bigint NOT NULL,
+  event_id uuid NOT NULL,
+  kind text NOT NULL CHECK (kind = ANY (ARRAY['impression'::text, 'consume'::text, 'share'::text, 'profile_visit'::text, 'listing_open'::text, 'not_interested'::text, 'hide_creator'::text, 'follow_from_post'::text, 'like'::text, 'comment'::text, 'save'::text, 'repost'::text, 'follow'::text, 'suggestion_impression'::text, 'suggestion_open'::text, 'suggestion_follow'::text, 'suggestion_dismiss'::text])),
+  origin text NOT NULL DEFAULT 'client'::text CHECK (origin = ANY (ARRAY['client'::text, 'server'::text])),
+  post_id bigint,
+  target_user_id bigint,
+  session_id uuid,
+  surface text,
+  src text,
+  slot smallint,
+  dwell_ms integer CHECK (dwell_ms IS NULL OR dwell_ms >= 0 AND dwell_ms <= 3600000),
+  watch_ms integer CHECK (watch_ms IS NULL OR watch_ms >= 0 AND watch_ms <= 3600000),
+  media_ms integer CHECK (media_ms IS NULL OR media_ms >= 0 AND media_ms <= 14400000),
+  loops smallint CHECK (loops IS NULL OR loops >= 0 AND loops <= 100),
+  outcome text CHECK (outcome IS NULL OR (outcome = ANY (ARRAY['skip'::text, 'glance'::text, 'view'::text, 'complete'::text, 'rewatch'::text]))),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT feed_events_pkey PRIMARY KEY (id),
+  CONSTRAINT feed_events_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT feed_events_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.posts(id),
+  CONSTRAINT feed_events_target_user_id_fkey FOREIGN KEY (target_user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.feed_sessions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id bigint,
+  mode text NOT NULL DEFAULT 'auth'::text CHECK (mode = ANY (ARRAY['auth'::text, 'guest'::text])),
+  scope text NOT NULL DEFAULT 'for_you'::text,
+  items jsonb NOT NULL DEFAULT '[]'::jsonb,
+  pos integer NOT NULL DEFAULT 0,
+  delivered integer NOT NULL DEFAULT 0,
+  consumed integer NOT NULL DEFAULT 0,
+  suggestions_shown smallint NOT NULL DEFAULT 0,
+  consumed_at_last_suggestion integer NOT NULL DEFAULT 0,
+  rebuilds smallint NOT NULL DEFAULT 0,
+  config_version text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  expires_at timestamp with time zone NOT NULL DEFAULT (now() + '00:30:00'::interval),
+  CONSTRAINT feed_sessions_pkey PRIMARY KEY (id),
+  CONSTRAINT feed_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.feed_config (
+  key text NOT NULL,
+  value jsonb NOT NULL,
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT feed_config_pkey PRIMARY KEY (key)
+);
+CREATE TABLE public.user_topic_affinity (
+  user_id bigint NOT NULL,
+  topic text NOT NULL,
+  score real NOT NULL DEFAULT 0,
+  events integer NOT NULL DEFAULT 0,
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT user_topic_affinity_pkey PRIMARY KEY (user_id, topic),
+  CONSTRAINT user_topic_affinity_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.user_creator_affinity (
+  user_id bigint NOT NULL,
+  creator_id bigint NOT NULL,
+  score real NOT NULL DEFAULT 0,
+  pos_events integer NOT NULL DEFAULT 0,
+  neg_events integer NOT NULL DEFAULT 0,
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT user_creator_affinity_pkey PRIMARY KEY (user_id, creator_id),
+  CONSTRAINT user_creator_affinity_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT user_creator_affinity_creator_id_fkey FOREIGN KEY (creator_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.user_creator_hides (
+  user_id bigint NOT NULL,
+  creator_id bigint NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT user_creator_hides_pkey PRIMARY KEY (user_id, creator_id),
+  CONSTRAINT user_creator_hides_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT user_creator_hides_creator_id_fkey FOREIGN KEY (creator_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.people_suggestions (
+  user_id bigint NOT NULL,
+  target_id bigint NOT NULL,
+  shown_count smallint NOT NULL DEFAULT 0,
+  first_shown_at timestamp with time zone,
+  last_shown_at timestamp with time zone,
+  opened_at timestamp with time zone,
+  dismissed_at timestamp with time zone,
+  followed_at timestamp with time zone,
+  reason text,
+  CONSTRAINT people_suggestions_pkey PRIMARY KEY (user_id, target_id),
+  CONSTRAINT people_suggestions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT people_suggestions_target_id_fkey FOREIGN KEY (target_id) REFERENCES public.users(id)
 );

@@ -28,6 +28,8 @@ function publicUrl(key: string | null | undefined): string | null {
   return `${SUPABASE_URL.replace(/\/+$/, "")}/storage/v1/object/public/${STORAGE_BUCKET}/${cleanKey}`;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export async function createAudioAsset(
   supabase: SupabaseClient,
   userId: number,
@@ -40,9 +42,10 @@ export async function createAudioAsset(
     // physically trimmed; this plus source_start_ms is the trim window.
     duration_ms: number;
     // Offset in ms into the uploaded source file where the clip begins.
-    // Defaults to 0 (start of file) for callers that don't crop.
     source_start_ms?: number;
     file_size?: number;
+    // Makes a retried registration return the same asset, not a second one.
+    client_request_id?: string;
   }
 ) {
   if (!input.storage_key.startsWith(`${userId}/`)) {
@@ -61,6 +64,23 @@ export async function createAudioAsset(
     throw new AudioValidationError({ source_start_ms: "Must not be negative." });
   }
 
+  const requestId =
+    typeof input.client_request_id === "string" && UUID_RE.test(input.client_request_id)
+      ? input.client_request_id.toLowerCase()
+      : null;
+
+  const findExisting = async () => {
+    if (!requestId) return null;
+    const { data, error } = await supabase
+      .from("audio_assets").select("*")
+      .eq("user_id", userId).eq("client_request_id", requestId).maybeSingle();
+    if (error) throw error;
+    return data;
+  };
+
+  const existing = await findExisting();
+  if (existing) return { asset: formatAudioAsset(existing) };
+
   const { data, error } = await supabase
     .from("audio_assets")
     .insert({
@@ -71,11 +91,18 @@ export async function createAudioAsset(
       duration_ms: input.duration_ms,
       source_start_ms: sourceStartMs,
       file_size: input.file_size ?? null,
+      client_request_id: requestId,
     })
     .select()
     .single();
 
-  if (error) throw error;
+  if (error) {
+    if (requestId && (error as { code?: string }).code === "23505") {
+      const raced = await findExisting();
+      if (raced) return { asset: formatAudioAsset(raced) };
+    }
+    throw error;
+  }
   return { asset: formatAudioAsset(data) };
 }
 

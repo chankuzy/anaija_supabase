@@ -59,15 +59,17 @@ async function searchPosts(supabase: SupabaseClient, query: string, tsQuery: str
   }));
 }
 
-async function searchUsers(supabase: SupabaseClient, query: string, limit: number) {
-  const safe = safeLike(query);
+async function searchUsers(supabase: SupabaseClient, query: string, limit: number, excludeId?: number) {
+  // "@john" should find username john.
+  const safe = safeLike(query.trim().replace(/^@+/, ""));
   if (!safe) return [];
-  const { data } = await supabase
+  let qb = supabase
     .from("users")
     .select("id, name, username, avatar_key, avatar, is_verified, campus_verified")
     .or(`username.ilike.%${safe}%,name.ilike.%${safe}%`)
-    .eq("is_active", true)
-    .limit(limit);
+    .eq("is_active", true);
+  if (excludeId) qb = qb.neq("id", excludeId);
+  const { data } = await qb.limit(limit);
 
   const q = safe.toLowerCase();
   const rank = (u: any) =>
@@ -89,7 +91,8 @@ const paged = (data: any[]) => ({ data, has_more: false, next_cursor: null });
 
 export async function search(supabase: SupabaseClient, query: string, type: string | null, _userId: number, cdnBase: string) {
   const tsQuery = toTsQuery(query);
-  if (!tsQuery) return { posts: [], listings: [], users: [] };
+  // People search doesn't use the full-text query, so don't bail for it.
+  if (!tsQuery && type !== "users") return { posts: [], listings: [], users: [] };
 
   const all = !type || type === "all";
   const wantUsers = all || type === "users";
@@ -97,8 +100,8 @@ export async function search(supabase: SupabaseClient, query: string, type: stri
   const limit = all ? PAGE_SIZE : TYPED_PAGE_SIZE;
 
   const [rows, users] = await Promise.all([
-    wantPosts ? searchPosts(supabase, query, tsQuery, limit) : Promise.resolve([] as any[]),
-    wantUsers ? searchUsers(supabase, query, limit) : Promise.resolve([] as any[]),
+    wantPosts ? searchPosts(supabase, query, tsQuery as string, limit) : Promise.resolve([] as any[]),
+    wantUsers ? searchUsers(supabase, query, limit, type === "users" ? _userId : undefined) : Promise.resolve([] as any[]),
   ]);
 
   const postRows = rows.filter((p) => p.type !== "listing");

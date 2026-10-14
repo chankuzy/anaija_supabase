@@ -1,5 +1,4 @@
 import type { SupabaseClient } from "../auth.ts";
-import { createNotification, TYPE_COMMENT } from "./notificationService.ts";
 
 const PAGE_SIZE = 20;
 
@@ -66,8 +65,6 @@ export async function listComments(supabase: SupabaseClient, postId: number, vie
 // ─── Create comment / reply ──────────────────────────────────────────────
 
 
-const PAGE_SIZE = 20;
-
 export async function createComment(
   supabase: SupabaseClient,
   postId: number,
@@ -83,8 +80,6 @@ export async function createComment(
   if (!post) return { notFound: true as const };
   if (post.type === "story") return { storiesNotAllowed: true as const };
   if (!post.allow_comments) return { disabled: true as const };
-
-  const label = post.type === "listing" ? "listing" : "post";
 
   let parent = null;
   if (parentId) {
@@ -105,31 +100,7 @@ export async function createComment(
     await supabase.from("posts").update({ comments_count: (post.comments_count ?? 0) + 1 }).eq("id", postId);
   }
 
-  // Body stays a clean action line — the full comment text rides along
-  // separately via comment_id -> comment_body (fetched in
-  // notificationDisplayService), so the client can render it as its own
-  // styled block rather than baking it into the notification sentence.
-  if (post.user_id !== userId) {
-    await createNotification(supabase, {
-      userId: post.user_id, actorId: userId, type: TYPE_COMMENT,
-      notifiableType: "posts", notifiableId: postId,
-      body: `${userName} commented on your ${label}.`,
-      commentId: comment.id,
-    });
-  }
-
-  // FIX: was notifiableType "comments" — meant reply notifications never got
-  // a post attached in listNotifications (posts are only batched for
-  // notifiable_type "posts"), so they showed no image and tapping one fell
-  // back to the actor's profile instead of opening the post/comment.
-  if (parent && parent.user_id !== userId && parent.user_id !== post.user_id) {
-    await createNotification(supabase, {
-      userId: parent.user_id, actorId: userId, type: TYPE_COMMENT,
-      notifiableType: "posts", notifiableId: postId,
-      body: `${userName} replied to your comment.`,
-      commentId: comment.id,
-    });
-  }
+  // Comment / reply / mention notifications are produced by the comments trigger (activity_events).
 
   return { comment: formatComment(comment, cdnBase, new Set()) };
 }

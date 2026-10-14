@@ -1,5 +1,4 @@
 import type { SupabaseClient } from "../auth.ts";
-import { createNotification } from "./notificationService.ts";
 import { formatListing, getLikedIds, getBookmarkedIds } from "./feedService.ts";
 import { resolveAvatarUrl } from "../avatar.ts";
 
@@ -91,12 +90,6 @@ export async function createInquiry(
     .eq("conversation_id", conversationId).eq("user_id", sellerId);
 
   await supabase.from("listing_details").update({ inquiries_count: (detail.inquiries_count ?? 0) + 1 }).eq("post_id", postId);
-
-  await createNotification(supabase, {
-    userId: sellerId, actorId: buyerId, type: TYPE_LISTING_INQUIRY,
-    notifiableType: "posts", notifiableId: postId,
-    body: `${buyerName} is interested in your listing.`,
-  });
 
   return {
     inquiry_id: inquiry.id,

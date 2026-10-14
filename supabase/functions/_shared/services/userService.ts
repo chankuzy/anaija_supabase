@@ -1,5 +1,4 @@
 import type { SupabaseClient } from "../auth.ts";
-import { createNotification, notifyAggregated, TYPE_FOLLOW } from "./notificationService.ts";
 import { batchAttachAudio } from "./audioAssetService.ts";
 import { resolveAvatarUrl } from "../avatar.ts";
 import { formatMedia } from "./feedService.ts";
@@ -175,7 +174,7 @@ export async function getUserStories(supabase: SupabaseClient, username: string,
     .eq("type", "story")
     .eq("is_active", true)
     .gt("expires_at", new Date().toISOString())
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: true }); // stories play oldest-first
 
   if (error) throw error;
 
@@ -389,13 +388,6 @@ export async function toggleFollow(supabase: SupabaseClient, followerId: number,
 
   await supabase.from("follows").insert({ follower_id: followerId, following_id: targetUserId });
 
-  await notifyAggregated(supabase, {
-    userId: targetUserId, actorId: followerId, actorName: followerName,
-    type: TYPE_FOLLOW, notifiableType: null, notifiableId: null,
-    singular: "started following you.",
-    plural: (n) => `and ${n} other${n === 1 ? "" : "s"} started following you.`,
-  });
-
   return { following: true };
 }
 
@@ -459,4 +451,27 @@ export async function getFollowing(supabase: SupabaseClient, username: string, v
   const followingSet = await followingSetFor(supabase, viewerId, page_.map((u: any) => u.id));
 
   return { data: page_.map((u: any) => formatFollowUser(u, followingSet)), hasMore };
+}
+export async function getUserReposts(supabase: SupabaseClient, username: string, page: number, perPage = PAGE_SIZE) {
+  const { data: profile } = await supabase.from("users").select("id").eq("username", username).eq("is_active", true).maybeSingle();
+  if (!profile) return { notFound: true as const };
+
+  const from = (page - 1) * perPage;
+  const { data, error } = await supabase
+    .from("reposts")
+    .select("*, post:posts(*, user:users(id, name, username, avatar_key, avatar), media:post_media(*))")
+    .eq("user_id", profile.id)
+    .order("id", { ascending: false })
+    .range(from, from + perPage); // one extra row to detect has_more
+  if (error) throw error;
+
+  const raw = data ?? [];
+  const hasMore = raw.length > perPage;
+  // Inactive / unprocessed posts are dropped AFTER paging, same as bookmarks.
+  const rows = raw.slice(0, perPage).filter((r: any) =>
+    r.post?.is_active && r.post.type === "post" && r.post.processing_status === "ready");
+
+  await batchAttachAudio(supabase, rows.map((r: any) => r.post));
+
+  return { rows, hasMore };
 }

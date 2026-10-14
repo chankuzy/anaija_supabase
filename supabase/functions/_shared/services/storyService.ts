@@ -2,7 +2,6 @@ import type { SupabaseClient } from "../auth.ts";
 import { findConversationBetween, assertCanSend } from "./messagingService.ts";
 import { getFollowStatus, isBlockedEitherWay } from "./blockService.ts";
 import { broadcastToConversation, broadcastToUser, broadcastBatch } from "./realtimeService.ts";
-import { notifyMessage } from "./notificationService.ts";
 
 // Story likes deliberately have no code here: a story is a `posts` row, so
 // likes go through interactionService.toggleLike (posts-like), which
@@ -154,16 +153,6 @@ export async function replyToStory(supabase: SupabaseClient, postId: number, vie
       unread_count: newUnreadCount,
     });
 
-    if (!other.is_muted) {
-      await notifyMessage(supabase, {
-        conversationId,
-        senderId: viewerId,
-        senderName: "Someone",
-        recipientId: other.user_id,
-        message: { body, type: "post_share" },
-        conversationTitle: null,
-      });
-    }
   }
 
   await broadcastToConversation(supabase, conversationId, "new_message", {

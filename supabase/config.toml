@@ -1417,3 +1417,51 @@ verify_jwt = false
 
 [functions.reports-store]
 verify_jwt = false
+
+[functions.posts-add-to-story]
+enabled = true
+verify_jwt = false
+import_map = "./functions/posts-add-to-story/deno.json"
+entrypoint = "./functions/posts-add-to-story/index.ts"
+
+[functions.content-settings]
+enabled = true
+verify_jwt = false
+import_map = "./functions/content-settings/deno.json"
+entrypoint = "./functions/content-settings/index.ts"
+
+[functions.follows-notify]
+enabled = true
+verify_jwt = false
+import_map = "./functions/follows-notify/deno.json"
+entrypoint = "./functions/follows-notify/index.ts"
+
+[functions.users-reposts]
+enabled = true
+verify_jwt = false
+import_map = "./functions/users-reposts/deno.json"
+entrypoint = "./functions/users-reposts/index.ts"
+
+[functions.activity]
+enabled = true
+verify_jwt = false
+import_map = "./functions/activity/deno.json"
+entrypoint = "./functions/activity/index.ts"
+
+[functions.feed-public]
+enabled = true
+verify_jwt = false
+import_map = "./functions/feed-public/deno.json"
+entrypoint = "./functions/feed-public/index.ts"
+
+[functions.feed-events]
+enabled = true
+verify_jwt = false
+import_map = "./functions/feed-events/deno.json"
+entrypoint = "./functions/feed-events/index.ts"
+
+[functions.feed-feedback]
+enabled = true
+verify_jwt = false
+import_map = "./functions/feed-feedback/deno.json"
+entrypoint = "./functions/feed-feedback/index.ts"

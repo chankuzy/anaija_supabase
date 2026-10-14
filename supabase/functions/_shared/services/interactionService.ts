@@ -1,5 +1,4 @@
 import type { SupabaseClient } from "../auth.ts";
-import { createNotification, notifyLike, notifyAggregated, TYPE_REPOST } from "./notificationService.ts";
 
 const APP_URL = Deno.env.get("APP_URL") ?? "https://anaija.app";
 
@@ -25,13 +24,6 @@ export async function toggleLike(supabase: SupabaseClient, userId: number, postI
   await supabase.from("post_likes").insert({ user_id: userId, post_id: postId });
   const newCount = (post.likes_count ?? 0) + 1;
   await supabase.from("posts").update({ likes_count: newCount }).eq("id", postId);
-
-  if (post.user_id !== userId) {
-    const label = post.type === "story" ? "story" : post.type === "listing" ? "listing" : "post";
-    await notifyLike(supabase, {
-      userId: post.user_id, actorId: userId, postId, actorName, label,
-    });
-  }
 
   return { liked: true, likes_count: newCount };
 }
@@ -152,15 +144,6 @@ export async function toggleRepost(supabase: SupabaseClient, userId: number, pos
   await supabase.from("reposts").insert({ user_id: userId, post_id: postId, quote: quote ?? null });
   const newCount = (post.reposts_count ?? 0) + 1;
   await supabase.from("posts").update({ reposts_count: newCount }).eq("id", postId);
-
-  if (post.user_id !== userId) {
-    await notifyAggregated(supabase, {
-      userId: post.user_id, actorId: userId, actorName,
-      type: TYPE_REPOST, notifiableType: "posts", notifiableId: postId,
-      singular: "reposted your post.",
-      plural: (n) => `and ${n} other${n === 1 ? "" : "s"} reposted your post.`,
-    });
-  }
 
   return { reposted: true, reposts_count: newCount };
 }
