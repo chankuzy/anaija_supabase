@@ -29,7 +29,7 @@ export interface FeedRequest {
 export interface FeedResult { body: Record<string, unknown>; trace: Record<string, unknown>[] }
 
 const SELECT =
-  "*, user:users(id, name, username, avatar_key, avatar, allow_story_sharing), media:post_media(*), listingDetail:listing_details(*)";
+  "*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar, allow_story_sharing), media:post_media(*), listingDetail:listing_details(*)";
 
 // Labels are shown ONLY for reasons the provider proved with real evidence.
 const PEOPLE_LABELS: Record<string, string> = {

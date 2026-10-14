@@ -321,7 +321,7 @@ export async function getFeedPage(
   // FIX: added `avatar` — see formatAuthor's comment above.
   let query = supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key, avatar, allow_story_sharing), media:post_media(*), listingDetail:listing_details(*)")
+    .select("*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar, allow_story_sharing), media:post_media(*), listingDetail:listing_details(*)")
     .eq("processing_status", "ready")
     .eq("is_active", true)
     .is("deleted_at", null)
@@ -435,7 +435,7 @@ export async function getMarketplaceFeed(
   // FIX: added `avatar` — see formatAuthor's comment above.
   let query = supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key, avatar, institution_id, allow_story_sharing), media:post_media(*), listingDetail:listing_details!inner(*)")
+    .select("*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar, institution_id, allow_story_sharing), media:post_media(*), listingDetail:listing_details!inner(*)")
     .eq("type", "listing")
     .eq("is_active", true)
     .eq("listingDetail.status", "available")
@@ -520,7 +520,7 @@ export async function getStoriesForUser(supabase: SupabaseClient, userId: number
   // FIX: added `avatar` — see formatAuthor's comment above.
   const { data: stories, error } = await supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key, avatar), media:post_media(*), storyViews:story_views(user_id)")
+    .select("*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar), media:post_media(*), storyViews:story_views(user_id)")
     .eq("type", "story")
     .eq("is_active", true)
     .gt("expires_at", new Date().toISOString())

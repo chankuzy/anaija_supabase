@@ -136,7 +136,7 @@ export async function getCommunityPosts(
 
   const { data: rows, error } = await supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key, avatar), media:post_media(*)")
+    .select("*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar), media:post_media(*)")
     .eq("community_id", communityId)
     .in("type", ["post", "listing"])
     .eq("is_active", true)

@@ -39,7 +39,7 @@ Deno.serve(async (req) => {
     if (userId !== null && !cursor) {
       try {
         const legacy = await getFeedPage(serviceClient(), userId, null, CDN_BASE, "for_you");
-        return json({ ...legacy, fallback: true });
+        const fb = json({ ...legacy, fallback: true }); fb.headers.set("X-Feed-Fallback", "1"); return fb;
       } catch (e) {
         console.error("[feed-legacy-fallback-failure]", e);
       }

@@ -362,7 +362,7 @@ export async function getPost(supabase: SupabaseClient, postId: number, viewerId
   // author avatar for anyone who hasn't uploaded a custom one.
   const { data: post, error } = await supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key, avatar), media:post_media(*)")
+    .select("*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar), media:post_media(*)")
     .eq("id", postId)
     .maybeSingle();
 

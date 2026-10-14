@@ -59,7 +59,7 @@ export async function listBookmarks(supabase: SupabaseClient, userId: number, ty
 
   const { data, error } = await supabase
     .from("bookmarks")
-    .select("created_at, post:posts(*, user:users(id, name, username, avatar_key), media:post_media(*))")
+    .select("created_at, post:posts(*, user:users!posts_user_id_foreign(id, name, username, avatar_key), media:post_media(*))")
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .range(from, to);

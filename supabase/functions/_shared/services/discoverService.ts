@@ -117,7 +117,7 @@ async function forYou(supabase: SupabaseClient, userId: number, institutionId: n
 
   let query = supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*)")
+    .select("*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*)")
     .eq("processing_status", "ready")
     .eq("is_active", true)
     .in("type", ["post", "listing"])
@@ -170,7 +170,7 @@ async function trending(supabase: SupabaseClient, userId: number, institutionId:
   // marketplace sort already trusts.
   const { data: postRows, error: postErr } = await supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*)")
+    .select("*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*)")
     .in("type", ["post", "listing"])
     .eq("is_active", true)
     .eq("processing_status", "ready")
@@ -261,7 +261,7 @@ async function nearby(
 
     const { data: postRows, error } = await supabase
       .from("posts")
-      .select("*, user:users(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*)")
+      .select("*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*)")
       .in("id", ids)
       .eq("is_active", true)
       .eq("processing_status", "ready")
@@ -299,7 +299,7 @@ async function nearby(
   const cursorId = cursor.p ?? Number.MAX_SAFE_INTEGER;
   let query = supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key, avatar), media:post_media(*)")
+    .select("*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar), media:post_media(*)")
     .eq("type", "post")
     .eq("processing_status", "ready")
     .eq("is_active", true)

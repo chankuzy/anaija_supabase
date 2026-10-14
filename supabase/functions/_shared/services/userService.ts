@@ -146,7 +146,7 @@ export async function getUserListings(supabase: SupabaseClient, username: string
 
   const { data: listings, error } = await supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*)")
+    .select("*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*)")
     .eq("user_id", profile.id)
     .eq("type", "listing")
     .eq("is_active", true)
@@ -195,7 +195,7 @@ export async function getUserLikedPosts(supabase: SupabaseClient, userId: number
 
   const { data: likeRows, error } = await supabase
     .from("post_likes")
-    .select("post_id, created_at, post:posts(*, user:users(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*))")
+    .select("post_id, created_at, post:posts(*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*))")
     .eq("user_id", userId)
     .lt("post_id", cursorId)
     .order("post_id", { ascending: false })
@@ -358,7 +358,7 @@ export async function getHighlightPosts(supabase: SupabaseClient, highlightId: n
     .from("user_highlight_posts")
     .select(`
       sort_order,
-      post:posts(*, user:users(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*))
+      post:posts(*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*))
     `)
     .eq("highlight_id", highlightId)
     .order("sort_order", { ascending: true });
@@ -459,7 +459,7 @@ export async function getUserReposts(supabase: SupabaseClient, username: string,
   const from = (page - 1) * perPage;
   const { data, error } = await supabase
     .from("reposts")
-    .select("*, post:posts(*, user:users(id, name, username, avatar_key, avatar), media:post_media(*))")
+    .select("*, post:posts(*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar), media:post_media(*))")
     .eq("user_id", profile.id)
     .order("id", { ascending: false })
     .range(from, from + perPage); // one extra row to detect has_more

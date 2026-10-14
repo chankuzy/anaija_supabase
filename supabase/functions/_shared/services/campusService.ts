@@ -11,7 +11,7 @@ export async function getCampusFeed(supabase: SupabaseClient, institutionId: num
 
   let query = supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key), media:post_media(*)")
+    .select("*, user:users!posts_user_id_foreign(id, name, username, avatar_key), media:post_media(*)")
     .eq("type", "post")
     .eq("processing_status", "ready")
     .eq("is_active", true)
@@ -63,7 +63,7 @@ export async function getCampusFeed(supabase: SupabaseClient, institutionId: num
 export async function getEvents(supabase: SupabaseClient, institutionId: number | null, cdnBase: string) {
   let query = supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key), media:post_media(*)")
+    .select("*, user:users!posts_user_id_foreign(id, name, username, avatar_key), media:post_media(*)")
     .eq("type", "post")
     .eq("subtype", "event")
     .eq("processing_status", "ready")
@@ -87,7 +87,7 @@ export async function getEvents(supabase: SupabaseClient, institutionId: number 
 export async function getAnnouncements(supabase: SupabaseClient, institutionId: number | null, cdnBase: string) {
   let query = supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key), media:post_media(*)")
+    .select("*, user:users!posts_user_id_foreign(id, name, username, avatar_key), media:post_media(*)")
     .eq("type", "post")
     .eq("subtype", "announcement")
     .eq("processing_status", "ready")

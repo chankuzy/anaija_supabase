@@ -49,7 +49,7 @@ export async function getPostsForTag(supabase: SupabaseClient, rawTag: string, u
   // PostgREST's limited support for filtering plain `json` columns.
   const { data: rows, error } = await supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key), media:post_media(*)")
+    .select("*, user:users!posts_user_id_foreign(id, name, username, avatar_key), media:post_media(*)")
     .eq("type", "post")
     .eq("processing_status", "ready")
     .eq("is_active", true)
@@ -85,7 +85,7 @@ export async function getListingsForTag(supabase: SupabaseClient, rawTag: string
 
   const { data: rows, error } = await supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key), media:post_media(*), listingDetail:listing_details!inner(*)")
+    .select("*, user:users!posts_user_id_foreign(id, name, username, avatar_key), media:post_media(*), listingDetail:listing_details!inner(*)")
     .eq("type", "listing")
     .eq("is_active", true)
     .eq("listingDetail.status", "available")

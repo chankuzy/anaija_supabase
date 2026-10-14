@@ -177,7 +177,7 @@ export async function getListing(supabase: SupabaseClient, postId: number, viewe
   // seller avatar at all.
   const { data: post, error } = await supabase
     .from("posts")
-    .select("*, user:users(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*)")
+    .select("*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*)")
     .eq("id", postId).maybeSingle();
 
   if (error) throw error;

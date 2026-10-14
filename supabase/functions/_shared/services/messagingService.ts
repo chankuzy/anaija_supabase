@@ -171,7 +171,7 @@ export async function listMessages(supabase: SupabaseClient, conversationId: num
     .select(`
       *,
       sender:users!messages_sender_id_foreign(id, name, username, avatar_key, avatar),
-      sharedPost:posts(*, user:users(id, name, username, avatar_key, avatar), listingDetail:listing_details(*), media:post_media(*))
+      sharedPost:posts(*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar), listingDetail:listing_details(*), media:post_media(*))
     `)
     .eq("conversation_id", conversationId)
     .lt("id", cursorId)
@@ -232,7 +232,7 @@ export async function sendMessage(
   if ("blocked" in gate) return { blocked: true as const };
   if ("requestLimitReached" in gate) return { requestLimitReached: true as const };
 
-  const selectClause = `*, sender:users!messages_sender_id_foreign(id, name, username, avatar_key, avatar), sharedPost:posts(*, user:users(id, name, username, avatar_key, avatar), listingDetail:listing_details(*), media:post_media(*))`;
+  const selectClause = `*, sender:users!messages_sender_id_foreign(id, name, username, avatar_key, avatar), sharedPost:posts(*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar), listingDetail:listing_details(*), media:post_media(*))`;
 
   if (input.client_temp_id) {
     const { data: existing } = await supabase
