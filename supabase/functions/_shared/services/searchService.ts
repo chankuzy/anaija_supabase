@@ -7,7 +7,7 @@ const PAGE_SIZE = 20;
 const TYPED_PAGE_SIZE = 40;
 
 const POST_SELECT =
-  "*, user:users(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*)";
+  "*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*)";
 
 // "iphone char" -> "iphone:* & char:*" (prefix match on every word).
 function toTsQuery(raw: string): string {

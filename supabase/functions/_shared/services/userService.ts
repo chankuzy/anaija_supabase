@@ -97,7 +97,7 @@ export async function getUserPosts(supabase: SupabaseClient, username: string, c
 
   const cursorId = cursor ? parseInt(atob(cursor), 10) : Number.MAX_SAFE_INTEGER;
 
-  const SEL = "*, user:users(id, name, username, avatar_key, avatar), media:post_media(*)";
+  const SEL = "*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar), media:post_media(*)";
 
   // First page only: pinned posts lead, most recently pinned first. They are
   // excluded from the paginated list below so nothing appears twice.
