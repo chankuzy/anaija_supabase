@@ -75,3 +75,8 @@ Run 01 and 02 and paste the verify/test output. Then write migration 03 (candida
   - DECISION: no people-dismiss endpoint. Impressions/open/follow/dismiss all go through /feed-events (suggestion_* kinds, validated in feed_ingest_events); trg_feed_follow stamps followed_at.
   - Suggestion units never repeat a person within a session (provider reads earlier units from feed_sessions). Weak wide-only candidates are suppressed by people.min_score (0.15).
   - Next: verify with real users, then posts-share -> 'share' event, then Phase 7 Flutter.
+- 2026-10-15: CORRECTION: guest backfill NOT needed. Prod audit: all 127 public post/listing rows already have public_since; 1 followers post stays out of guest pool. Remove "Pending approval" item.
+  - Visibility hardened: _shared/visibility.ts (public|followers|campus|private; 'institution' = legacy alias for campus), enforced in postService create+update (ValidationError -> 422; posts-update now maps it), DB constraint posts_visibility_check. Fixed bug: Flutter picker sent 'institution', which feed_visible_to treats as invisible; picker now sends 'campus', drafts normalise on load.
+  - posts-share rewritten: requires visibility, own shares never count, one share per (user,post) via deterministic event id through feed_ingest_events; legacy shares_count bumps only on first accepted share; engine failure still returns the link.
+  - Phase 7 so far: 7a typed items + event tracker, 7b people unit page. STILL MISSING: guest path (no token -> feed-public), caught-up/next_actions renderer, scope=campus switch.
+  - Next: Flutter guest path + caught-up renderer.

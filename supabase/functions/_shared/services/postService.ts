@@ -2,6 +2,7 @@ import type { SupabaseClient } from "../auth.ts";
 import { syncHashtags } from "./hashtagService.ts";
 import { batchAttachAudio } from "./audioAssetService.ts";
 import { MEDIA_LIMITS } from "../mediaLimits.ts";
+import { normalizeVisibility } from "../visibility.ts";
 
 export const TYPE_POST = "post";
 export const TYPE_STORY = "story";
@@ -18,6 +19,12 @@ export class ValidationError extends Error {
     super("Validation failed.");
     this.errors = errors;
   }
+}
+
+function resolveVisibility(v: unknown): string {
+  const out = normalizeVisibility(v);
+  if (!out) throw new ValidationError({ visibility: "Visibility must be public, followers, campus or private." });
+  return out;
 }
 
 interface MediaInput {
@@ -224,7 +231,7 @@ export async function createPost(
     allow_story_sharing: typeof input.allow_story_sharing === "boolean" ? input.allow_story_sharing : null,
     allow_duet: type === TYPE_POST,
     hashtags: input.hashtags ?? [],
-    visibility: input.visibility ?? "public",
+    visibility: resolveVisibility(input.visibility ?? "public"),
     is_active: true,
     processing_status: "ready",
     video_key: "",
@@ -403,7 +410,7 @@ export async function updatePost(supabase: SupabaseClient, postId: number, userI
 
   const updates: Record<string, unknown> = {};
   for (const field of ["caption", "allow_comments", "allow_story_sharing", "visibility", "hashtags"]) {
-    if (input[field] !== undefined) updates[field] = input[field];
+    if (input[field] !== undefined) updates[field] = field === "visibility" ? resolveVisibility(input[field]) : input[field];
   }
 
   // ── AUDIO ASSET OWNERSHIP ON UPDATE ──
