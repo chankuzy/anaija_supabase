@@ -157,3 +157,14 @@ export function mergeRebuild(existing: SessionItem[], fresh: SessionItem[], max 
   }
   return out;
 }
+
+/**
+ * True when a rebuild batch carries at least one NEW non-listing post.
+ * A batch of only surplus listings must not be merged: composition paces listings
+ * (one per page, min gap), so merging them yields one-item pages, one per rebuild.
+ */
+export function rebuildAddsContent(existing: SessionItem[], fresh: SessionItem[]): boolean {
+  const seen = new Set<number>();
+  for (const it of existing) if (it.t === "post") seen.add(it.id);
+  return fresh.some((it) => it.t === "post" && !seen.has(it.id) && it.k !== "listing");
+}

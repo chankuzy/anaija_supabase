@@ -6,7 +6,7 @@ import { type Candidate, EMPTY_PROFILE, type Profile } from "./types.ts";
 import { rankCandidates, topFactors } from "./scoring.ts";
 import { compose, suggestionDue, suggestionSlot } from "./composer.ts";
 import {
-  advanceSession, createSession, type FeedSession, getSession, mergeRebuild, newCursorPayload,
+  advanceSession, createSession, type FeedSession, getSession, mergeRebuild, rebuildAddsContent, newCursorPayload,
   type SessionItem, signCursor, verifyCursor, SESSION_TTL_MS,
 } from "./session.ts";
 import { batchAttachAudio } from "../services/audioAssetService.ts";
@@ -259,9 +259,15 @@ export async function getFeed(req: FeedRequest): Promise<FeedResult> {
       rebuilds < cfg.compose.max_rebuilds) {
     const exclude = new Set(items.filter((i): i is Extract<SessionItem, { t: "post" }> => i.t === "post").map((i) => i.id));
     const built = await buildRanked(supabase, viewerId, cfg, `${session.id}:${rebuilds + 1}`, exclude);
-    const merged = mergeRebuild(items, built.items);
-    if (merged.length > items.length) items = merged;
-    rebuilds++;
+    if (rebuildAddsContent(items, built.items)) {
+      const merged = mergeRebuild(items, built.items);
+      if (merged.length > items.length) items = merged;
+      rebuilds++;
+    } else {
+      // Only surplus listings (or nothing) are left. Merging them would add one paced listing per
+      // rebuild, i.e. one-item pages. Stop rebuilding; the feed ends cleanly at caught_up.
+      rebuilds = cfg.compose.max_rebuilds;
+    }
     changed = true;
   }
 
