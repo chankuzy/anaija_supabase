@@ -1,6 +1,9 @@
 // Feed composition: turns a ranked list into a coherent, varied, paced feed. Pure + deterministic.
 // Constraints relax in steps (level 0 strict -> 3 loose) so diversity rules never drop eligible content,
 // EXCEPT listings, whose pacing limits are hard (marketplace must stay occasional, never a catalogue).
+// Tail exception: when nothing but listings is left, spacing is unsatisfiable (no other content to space
+// them with) and enforcing it only yields one-item pages, so the gap/min-slot rules are skipped and the
+// per-page cap is raised to compose.listing_tail_max. The score floor still applies.
 import type { Scored } from "./types.ts";
 import type { FeedConfig } from "./config.ts";
 import { hash01 } from "./scoring.ts";
@@ -39,13 +42,18 @@ export function compose(
     const inPage = out.filter((p) => p.slot >= pageStart);
     const listingsInPage = inPage.filter((p) => formatOf(p.s) === "listing").length;
 
+    const tail = remaining.length > 0 && remaining.every((s) => formatOf(s) === "listing");
+    const listingCap = tail
+      ? Math.max(cc.listing_max_per_page, extra(cfg, "listing_tail_max", 4))
+      : cc.listing_max_per_page;
+
     const ok = (s: Scored, level: number): boolean => {
       const f = formatOf(s);
       if (f === "listing") {
         if (s.score < cc.listing_min_score) return false;
-        if (listingsInPage >= cc.listing_max_per_page) return false;
-        if (slot - lastListing < cc.listing_min_gap) return false;
-        if (level < 3 && slot < cc.listing_min_slot) return false;
+        if (listingsInPage >= listingCap) return false;
+        if (!tail && slot - lastListing < cc.listing_min_gap) return false;
+        if (!tail && level < 3 && slot < cc.listing_min_slot) return false;
       }
       if (level < 3 && inPage.filter((p) => p.s.c.author_id === s.c.author_id).length >= cc.max_author_per_page) {
         return false;
@@ -84,7 +92,10 @@ export function compose(
     const [s] = remaining.splice(idx, 1);
     if (isExplore(s)) exploreN++;
     if (isWide(s)) wideN++;
-    if (formatOf(s) === "listing") lastListing = slot;
+    if (formatOf(s) === "listing") {
+      lastListing = slot;
+      if (tail) rules.push("listing_tail");
+    }
     out.push({ s, slot, rules });
   }
   return { items: out, leftover: remaining };
