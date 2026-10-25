@@ -1,8 +1,15 @@
 /// <reference path="../_shared/deno-shim.d.ts" />
 // Behavioural event ingestion (batched). The server validates, dedupes, classifies and aggregates;
 // the client only reports raw metrics. See feed_ingest_events (migration 02) for the rules.
+// Discover grid events (surface='discover', kind impression|open) are routed to discover_ingest_events
+// (migration discover_01). Everything else, including full-screen consume events that carry
+// surface='discover_view', goes through feed_ingest_events unchanged.
 import { serviceClient, requireAuth, AuthError } from "../_shared/auth.ts";
 import { json, handleCors } from "../_shared/response.ts";
+
+type Ev = Record<string, unknown>;
+type Counts = { accepted?: number; duplicates?: number; rejected?: number; error?: string };
+const DISCOVER_KINDS = new Set(["impression", "open"]);
 
 Deno.serve(async (req) => {
   const cors = handleCors(req);
@@ -19,15 +26,30 @@ Deno.serve(async (req) => {
     if (!Array.isArray(body.events)) return json({ message: "events must be an array." }, 422);
     if (body.events.length === 0) return json({ accepted: 0, duplicates: 0, rejected: 0 });
 
-    const { data, error } = await supabase.rpc("feed_ingest_events", { p_user: userId, p_events: body.events });
-    if (error) {
-      console.error("[feed-events] ingest failed:", error.message);
-      return json({ message: "Temporarily unavailable." }, 503); // client keeps the batch and retries
+    const events = body.events as Ev[];
+    const disc = events.filter((e) => e && typeof e === "object" && e.surface === "discover" && DISCOVER_KINDS.has(String(e.kind)));
+    const rest = events.filter((e) => !disc.includes(e));
+
+    const results: Counts[] = [];
+    for (const [fn, batch] of [["feed_ingest_events", rest], ["discover_ingest_events", disc]] as const) {
+      if (!batch.length) continue;
+      const { data, error } = await supabase.rpc(fn, { p_user: userId, p_events: batch });
+      if (error) {
+        console.error(`[feed-events] ${fn} failed:`, error.message);
+        return json({ message: "Temporarily unavailable." }, 503); // client keeps the batch; event_id dedupe makes the retry safe
+      }
+      results.push(data as Counts);
     }
-    const result = data as { error?: string };
-    if (result?.error === "rate_limited") return json(result, 429);
-    if (result?.error) return json(result, 422);
-    return json(data);
+
+    const merged: Counts = {
+      accepted: results.reduce((n, r) => n + (r.accepted ?? 0), 0),
+      duplicates: results.reduce((n, r) => n + (r.duplicates ?? 0), 0),
+      rejected: results.reduce((n, r) => n + (r.rejected ?? 0), 0),
+    };
+    const err = results.find((r) => r.error)?.error;
+    if (err === "rate_limited") return json({ ...merged, error: err }, 429);
+    if (err) return json({ ...merged, error: err }, 422);
+    return json(merged);
   } catch (err) {
     if (err instanceof AuthError) return json({ message: err.message }, err.status);
     console.error(err);

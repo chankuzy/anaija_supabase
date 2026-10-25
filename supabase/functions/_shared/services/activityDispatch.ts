@@ -1,10 +1,10 @@
 import type { SupabaseClient } from "../auth.ts";
-import { sendPushToUser } from "./pushService.ts";
+import { sendPushToUser, type PushPayload } from "./pushService.ts";
 import { shouldPush, getPreferences } from "./preferencesService.ts";
 import { isViewingEntity } from "./presenceService.ts";
 import { isRateLimited, recordPushSent } from "./rateLimitService.ts";
 import { buildCtx } from "./activityService.ts";
-import { renderActivity } from "./activityCopy.ts";
+import { renderActivity, type Noun, type PostInfo } from "./activityCopy.ts";
 
 const MAX_ATTEMPTS = 5;
 const BACKOFF_MIN = [1, 2, 4, 8, 16];
@@ -12,12 +12,23 @@ const BACKOFF_MIN = [1, 2, 4, 8, 16];
 type Outcome = { status: "sent" | "suppressed" | "retry" | "dead"; reason?: string; error?: string };
 const supp = (reason: string): Outcome => ({ status: "suppressed", reason });
 
-// kind -> legacy type name the preference/rate-limit helpers understand
 const PREF_TYPE: Record<string, string> = {
   like: "like", story_like: "like", milestone: "like", repost: "repost",
   comment: "comment", reply: "comment", mention: "comment",
   follow: "follow", follow_back: "follow", message: "message",
 };
+
+const clip = (s: string | null | undefined, n: number) => {
+  const t = (s ?? "").replace(/\s+/g, " ").trim();
+  return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t;
+};
+const display = (a?: { name?: string | null; username?: string | null }) =>
+  a?.name?.trim() || a?.username || "Someone";
+const A_NOUN: Record<Noun, string> = { reel: "a reel", post: "a post", listing: "a listing", story: "a story" };
+
+function listingLine(p: PostInfo): string {
+  return [clip(p.caption, 48), p.price ? `₦${p.price}` : ""].filter(Boolean).join(" · ");
+}
 
 export async function sweep(supabase: SupabaseClient) {
   const nowIso = new Date().toISOString();
@@ -32,7 +43,6 @@ export async function sweep(supabase: SupabaseClient) {
 
 export async function dispatchOne(supabase: SupabaseClient, id: number) {
   const stale = new Date(Date.now() - 120_000).toISOString();
-  // Atomic claim: a duplicate webhook delivery (or a forged call) can't double-send.
   const { data: row } = await supabase.from("push_outbox")
     .update({ status: "sending", claimed_at: new Date().toISOString() })
     .eq("id", id)
@@ -79,8 +89,7 @@ async function gates(
 }
 
 async function deliver(
-  supabase: SupabaseClient, row: any, prefType: string,
-  payload: { title: string; body: string; data: Record<string, string> }, tag: string,
+  supabase: SupabaseClient, row: any, prefType: string, payload: PushPayload, tag: string,
 ): Promise<Outcome> {
   const res = await sendPushToUser(supabase, row.recipient_id, payload, { tag });
   if (res.devices === 0) return supp("no_device");
@@ -102,9 +111,26 @@ function previewOf(m: any): string {
   }
 }
 
+async function describeShare(supabase: SupabaseClient, msg: any, recipientId: number) {
+  const postId = Number(msg.shared_post_id);
+  const ctx = await buildCtx(supabase, { id: recipientId, username: "" }, [
+    { actors_preview: [msg.sender_id], content_id: postId, targets_preview: [] },
+  ]);
+  const post = ctx.posts.get(postId);
+  if (!post || !post.active) return null;
+  const isReply = post.noun === "story" && post.ownerId === recipientId;
+  return {
+    postId,
+    noun: post.noun,
+    thumb: post.thumb,
+    verb: isReply ? "replied to your story" : `sent you ${A_NOUN[post.noun]}`,
+    detail: post.noun === "listing" ? listingLine(post) : post.noun === "story" ? "" : clip(post.caption, 90),
+  };
+}
+
 async function processMessage(supabase: SupabaseClient, row: any): Promise<Outcome> {
   const { data: msg } = await supabase.from("messages")
-    .select("id, conversation_id, sender_id, type, body, created_at, deleted_at, sender:users!messages_sender_id_foreign(id, name, username, avatar_key, avatar)")
+    .select("id, conversation_id, sender_id, type, body, shared_post_id, created_at, deleted_at, sender:users!messages_sender_id_foreign(id, name, username, avatar_key, avatar)")
     .eq("id", row.message_id).maybeSingle();
   if (!msg || msg.deleted_at) return supp("message_gone");
 
@@ -135,15 +161,31 @@ async function processMessage(supabase: SupabaseClient, row: any): Promise<Outco
   else if (unread > 1) body = `${unread} new messages`;
   else body = hide ? "sent you a message" : previewOf(msg);
 
+  let web: PushPayload["web"];
+  const extra: Record<string, string> = {};
+  const isShare = (msg.type === "post_share" || msg.type === "listing_share") && msg.shared_post_id;
+  if (isShare && !hide && part.request_status !== "pending" && unread === 1) {
+    const s = await describeShare(supabase, msg, row.recipient_id);
+    if (s) {
+      const note = clip(msg.body, 100);
+      body = note || s.verb;
+      web = { title: `${name} ${s.verb}`, body: note ? `“${note}”` : s.detail };
+      extra.share_kind = s.noun;
+      extra.post_id = String(s.postId);
+      if (s.thumb) extra.image = s.thumb;
+    }
+  }
+
   const avatar = sender ? resolveAvatarUrl(sender.avatar_key ?? sender.avatar) : null;
   const data: Record<string, string> = {
     type: "message", dest: "conversation",
     conversation_id: String(row.conversation_id), title: name,
     username: String(sender?.username ?? ""), actor_username: String(sender?.username ?? ""),
     user_id: String(sender?.id ?? ""),
+    ...extra,
   };
   if (avatar) data.avatar = avatar;
-  return await deliver(supabase, row, "message", { title: name, body, data }, `chat:${row.conversation_id}`);
+  return await deliver(supabase, row, "message", { title: name, body, data, web }, `chat:${row.conversation_id}`);
 }
 
 async function processActivity(supabase: SupabaseClient, row: any): Promise<Outcome> {
@@ -180,6 +222,19 @@ async function processActivity(supabase: SupabaseClient, row: any): Promise<Outc
   if (first?.avatar) data.avatar = first.avatar;
   if (view.thumb) data.image = view.thumb;
 
+  const who = display(first);
+  let web: PushPayload["web"];
+  if (item.kind === "post_new" && post) {
+    web = post.noun === "listing"
+      ? { title: `${who} listed something new`, body: listingLine(post) }
+      : {
+          title: post.noun === "reel" ? `${who} posted a new reel` : `${who} shared a new post`,
+          body: clip(post.caption, 90),
+        };
+  } else {
+    web = { title: view.title, body: view.preview ? `“${clip(view.preview, 120)}”` : "" };
+  }
+
   const body = view.preview ? `${view.title}: “${view.preview}”` : view.title;
-  return await deliver(supabase, row, prefType, { title: "Anaija", body, data }, `item:${item.id}`);
+  return await deliver(supabase, row, prefType, { title: "Anaija", body, data, web }, `item:${item.id}`);
 }

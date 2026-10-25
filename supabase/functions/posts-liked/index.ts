@@ -2,7 +2,7 @@
 import { serviceClient, requireAuth, AuthError } from "../_shared/auth.ts";
 import { json, handleCors } from "../_shared/response.ts";
 import { getUserLikedPosts } from "../_shared/services/userService.ts";
-import { formatPost, formatListing, getBookmarkedIds } from "../_shared/services/feedService.ts";
+import { formatPost, formatListing, getBookmarkedIds, getRepostedIds } from "../_shared/services/feedService.ts";
 
 const CDN_BASE = Deno.env.get("CDN_BASE_URL") ?? "";
 
@@ -19,12 +19,14 @@ Deno.serve(async (req) => {
     const cursor = new URL(req.url).searchParams.get("cursor");
 
     const result = await getUserLikedPosts(supabase, userId, cursor);
-    const bookmarkedSet = await getBookmarkedIds(supabase, userId, result.page.map((p: any) => p.id));
+    const likedIds = result.page.map((p: any) => p.id);
+    const bookmarkedSet = await getBookmarkedIds(supabase, userId, likedIds);
+    const repostedSet = await getRepostedIds(supabase, userId, likedIds);
 
     const data = await Promise.all(result.page.map((p: any) =>
       p.type === "listing"
         ? formatListing(supabase, p, CDN_BASE, false, true, bookmarkedSet.has(p.id))
-        : formatPost(supabase, p, CDN_BASE, true, bookmarkedSet.has(p.id)),
+        : formatPost(supabase, Object.assign(p, { _reposted: repostedSet.has(p.id) }), CDN_BASE, true, bookmarkedSet.has(p.id)),
     ));
 
     return json({

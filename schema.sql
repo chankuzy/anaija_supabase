@@ -139,7 +139,7 @@ CREATE TABLE public.posts (
   type character varying NOT NULL DEFAULT 'post'::character varying,
   subtype character varying,
   context json,
-  visibility character varying NOT NULL DEFAULT 'public'::character varying,
+  visibility character varying NOT NULL DEFAULT 'public'::character varying CHECK (visibility::text = ANY (ARRAY['public'::character varying, 'followers'::character varying, 'campus'::character varying, 'private'::character varying]::text[])),
   expires_at timestamp without time zone,
   latitude numeric,
   longitude numeric,
@@ -285,6 +285,7 @@ CREATE TABLE public.listing_details (
   service_radius_km smallint,
   minimum_order_price bigint,
   verification_status character varying NOT NULL DEFAULT 'unverified'::character varying,
+  location_info jsonb,
   CONSTRAINT listing_details_pkey PRIMARY KEY (id),
   CONSTRAINT listing_details_post_id_foreign FOREIGN KEY (post_id) REFERENCES public.posts(id)
 );
@@ -492,6 +493,14 @@ CREATE TABLE public.message_receipts (
   CONSTRAINT message_receipts_pkey PRIMARY KEY (id),
   CONSTRAINT message_receipts_message_id_foreign FOREIGN KEY (message_id) REFERENCES public.messages(id),
   CONSTRAINT message_receipts_user_id_foreign FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.message_deletions (
+  message_id bigint NOT NULL,
+  user_id bigint NOT NULL,
+  created_at timestamp without time zone DEFAULT now(),
+  CONSTRAINT message_deletions_pkey PRIMARY KEY (message_id, user_id),
+  CONSTRAINT message_deletions_message_id_foreign FOREIGN KEY (message_id) REFERENCES public.messages(id) ON DELETE CASCADE,
+  CONSTRAINT message_deletions_user_id_foreign FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE
 );
 CREATE TABLE public.comment_likes (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,

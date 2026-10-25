@@ -10,7 +10,7 @@ const PAGE_SIZE = 30;
 export async function getInbox(supabase: SupabaseClient, userId: number) {
   const { data: myRows, error: myErr } = await supabase
     .from("conversation_participants")
-    .select("conversation_id, unread_count, is_muted, request_status")
+    .select("conversation_id, unread_count, is_muted, request_status, cleared_at")
     .eq("user_id", userId);
   if (myErr) throw myErr;
 
@@ -53,9 +53,9 @@ export async function getInbox(supabase: SupabaseClient, userId: number) {
       type: c.type,
       title: c.title ?? other?.name ?? null,
       avatar: otherAvatar,
-      last_message_body: c.last_message_body,
+      last_message_body: isCleared(mine?.cleared_at, c.last_message_at) ? null : c.last_message_body,
       last_message_at: c.last_message_at,
-      unread_count: mine?.unread_count ?? 0,
+      unread_count: isCleared(mine?.cleared_at, c.last_message_at) ? 0 : (mine?.unread_count ?? 0),
       is_muted: mine?.is_muted ?? false,
       request_status: mine?.request_status ?? "accepted",
       other_user: other ? {
@@ -175,18 +175,33 @@ export async function listMessages(supabase: SupabaseClient, conversationId: num
     `)
     .eq("conversation_id", conversationId)
     .lt("id", cursorId)
+    .gt("created_at", participant.cleared_at ?? "1970-01-01T00:00:00Z")
     .order("id", { ascending: false })
     .limit(PAGE_SIZE);
 
   if (error) throw error;
 
-  const messages = (rows ?? []).slice().reverse();
+  const msgIds = (rows ?? []).map((m: any) => m.id);
+  const deletedForMe = new Set<number>();
+  if (msgIds.length) {
+    const { data: myDeletions } = await supabase
+      .from("message_deletions")
+      .select("message_id")
+      .eq("user_id", userId)
+      .in("message_id", msgIds);
+    for (const d of myDeletions ?? []) deletedForMe.add(d.message_id);
+  }
+
+  const messages = (rows ?? [])
+    .filter((m: any) => !deletedForMe.has(m.id) && !(m.deleted_for_sender && m.sender_id === userId))
+    .slice()
+    .reverse();
   const hasMore = messages.length === PAGE_SIZE;
 
   const replyToIds = [...new Set(messages.filter((m: any) => m.reply_to_id).map((m: any) => m.reply_to_id))];
   const replyToMap = new Map<number, any>();
   if (replyToIds.length) {
-    const { data: replies } = await supabase.from("messages").select("id, body, sender_id").in("id", replyToIds);
+    const { data: replies } = await supabase.from("messages").select("id, body, sender_id, type, deleted_at").in("id", replyToIds);
     for (const r of replies ?? []) replyToMap.set(r.id, r);
   }
 
@@ -231,6 +246,14 @@ export async function sendMessage(
   if ("unauthorized" in gate) return { unauthorized: true as const };
   if ("blocked" in gate) return { blocked: true as const };
   if ("requestLimitReached" in gate) return { requestLimitReached: true as const };
+
+  const isMediaType = ["image", "video", "file", "audio"].includes(input.type ?? "");
+  if (
+    isMediaType !== !!input.media_key ||
+    (input.media_key && (!input.media_key.startsWith(`${userId}/`) || input.media_key.includes("..")))
+  ) {
+    return { invalidMedia: true as const };
+  }
 
   const selectClause = `*, sender:users!messages_sender_id_foreign(id, name, username, avatar_key, avatar), sharedPost:posts(*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar), listingDetail:listing_details(*), media:post_media(*))`;
 
@@ -288,8 +311,10 @@ export async function sendMessage(
     .single();
 
   const lastMessageAt = new Date().toISOString();
-  const previewBody = message.body ?? (message.type === "post_share"
+  const previewBody = message.type === "file" ? "Sent a file" : message.body ?? (message.type === "post_share"
     ? (message.sharedPost?.type === "listing" ? "Shared a listing" : "Shared a post")
+    : message.type === "audio"
+    ? "🎵 Voice message"
     : `[${message.type}]`);
 
   await supabase.from("conversations").update({
@@ -328,7 +353,7 @@ async function withReplyTo(supabase: SupabaseClient, m: any) {
   if (!m.reply_to_id) return m;
   const { data: reply } = await supabase
     .from("messages")
-    .select("id, body, sender_id")
+    .select("id, body, sender_id, type, deleted_at")
     .eq("id", m.reply_to_id)
     .maybeSingle();
   return { ...m, replyTo: reply ?? null };
@@ -450,18 +475,98 @@ export async function deleteMessage(supabase: SupabaseClient, conversationId: nu
       body: null, media_key: null, shared_post_id: null, deleted_at: new Date().toISOString(),
     }).eq("id", messageId);
 
+    const { data: conv } = await supabase.from("conversations").select("last_message_at").eq("id", conversationId).single();
+    if (conv && conv.last_message_at === message.created_at) {
+      await supabase.from("conversations").update({ last_message_body: "This message was deleted" }).eq("id", conversationId);
+    }
+
     await broadcastToConversation(supabase, conversationId, "message_deleted", { message_id: messageId });
 
     return { everyone: true as const };
   }
 
-  if (message.sender_id !== userId) return { cannotHide: true as const };
+  // Delete for me: record per-user deletion
+  if (message.sender_id === userId) {
+    await supabase.from("messages").update({ deleted_for_sender: true }).eq("id", messageId);
+  }
+  await supabase.from("message_deletions").upsert(
+    { message_id: messageId, user_id: userId, created_at: new Date().toISOString() },
+    { onConflict: "message_id,user_id" },
+  );
 
-  await supabase.from("messages").update({ deleted_for_sender: true }).eq("id", messageId);
   return { me: true as const };
 }
 
+// ─── Edit message ─────────────────────────────────────────────────────────
+
+export async function updateMessage(
+  supabase: SupabaseClient,
+  conversationId: number,
+  messageId: number,
+  userId: number,
+  input: { body: string },
+) {
+  const { data: participant } = await supabase
+    .from("conversation_participants").select("id").eq("conversation_id", conversationId).eq("user_id", userId).maybeSingle();
+  if (!participant) return { unauthorized: true as const };
+
+  const { data: message, error } = await supabase.from("messages").select("*").eq("id", messageId).eq("conversation_id", conversationId).maybeSingle();
+  if (error) throw error;
+  if (!message) return { notFound: true as const };
+
+  if (message.sender_id !== userId) return { notOwner: true as const };
+  if (message.deleted_at) return { deleted: true as const };
+  if (message.type !== "text") return { notEditable: true as const };
+
+  const ageMinutes = (Date.now() - new Date(message.created_at).getTime()) / 60_000;
+  if (ageMinutes > 15) return { tooLate: true as const };
+
+  const newBody = input.body?.trim();
+  if (!newBody) return { invalidBody: true as const };
+
+  const now = new Date().toISOString();
+  const selectClause = `*, sender:users!messages_sender_id_foreign(id, name, username, avatar_key, avatar), sharedPost:posts(*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar), listingDetail:listing_details(*), media:post_media(*))`;
+
+  const { data: updated, error: updateErr } = await supabase
+    .from("messages")
+    .update({ body: newBody, updated_at: now })
+    .eq("id", messageId)
+    .select(selectClause)
+    .single();
+  if (updateErr) throw updateErr;
+
+  const { data: conv } = await supabase.from("conversations").select("last_message_at").eq("id", conversationId).single();
+  if (conv && conv.last_message_at === message.created_at) {
+    await supabase.from("conversations").update({ last_message_body: newBody }).eq("id", conversationId);
+  }
+
+  const formatted = formatMessage(await withReplyTo(supabase, updated));
+  await broadcastToConversation(supabase, conversationId, "message_edited", {
+    message_id: messageId,
+    body: newBody,
+    updated_at: now,
+    message: formatted,
+  });
+
+  return { message: formatted };
+}
+
 // ─── Format helpers ────────────────────────────────────────────────────────
+
+// Media originals have no body; give the reply chip a readable label.
+function replyBodyFor(r: any): string | null {
+  if (r.deleted_at) return "Message deleted";
+  if (r.body) return r.body;
+  switch (r.type) {
+    case "image": return "Photo";
+    case "video": return "Video";
+    case "audio": return "Voice message";
+    case "file": return "File";
+    case "post_share": return "Shared a post";
+    case "listing_share": return "Shared a listing";
+    default: return null;
+  }
+}
 
 function formatMessage(m: any) {
   return {
@@ -470,11 +575,13 @@ function formatMessage(m: any) {
     type: m.type,
     body: m.body,
     is_deleted: !!m.deleted_at,
+    is_edited: !!(m.updated_at && m.updated_at !== m.created_at),
+    edited_at: m.updated_at ?? null,
     client_temp_id: m.client_temp_id ?? null,
     media_url: resolveAvatarUrl(m.media_key),
     media_type: m.media_type,
     reactions: m.reactions ?? {},
-    reply_to: m.replyTo ? { id: m.replyTo.id, body: m.replyTo.body } : null,
+    reply_to: m.replyTo ? { id: m.replyTo.id, body: replyBodyFor(m.replyTo) } : null,
     shared_post: m.sharedPost ? formatSharedPost(m.sharedPost) : null,
     sender: m.sender ? {
       id: m.sender.id, name: m.sender.name, username: m.sender.username,
@@ -542,4 +649,82 @@ export async function setConversationMuted(
   if (updateErr) throw updateErr;
 
   return { success: true, conversation_id: conversationId, is_muted: isMuted };
+}
+
+// ─── Clear chat / info / shared media ──────────────────────────────────────
+
+function asUtcMs(v: string | null | undefined): number {
+  if (!v) return 0;
+  return new Date(/[zZ]$|[+-]\d\d(:?\d\d)?$/.test(v) ? v : `${v}Z`).getTime();
+}
+
+function isCleared(clearedAt: string | null | undefined, lastAt: string | null | undefined): boolean {
+  return !!clearedAt && asUtcMs(clearedAt) >= asUtcMs(lastAt);
+}
+
+export async function clearConversation(supabase: SupabaseClient, conversationId: number, userId: number) {
+  const { data: p } = await supabase
+    .from("conversation_participants").select("id")
+    .eq("conversation_id", conversationId).eq("user_id", userId).maybeSingle();
+  if (!p) return { unauthorized: true as const };
+
+  const { error } = await supabase.from("conversation_participants")
+    .update({ cleared_at: new Date().toISOString(), unread_count: 0 })
+    .eq("id", p.id);
+  if (error) throw error;
+  return { ok: true as const };
+}
+
+export async function getConversationInfo(
+  supabase: SupabaseClient, conversationId: number, userId: number, withMedia: boolean,
+) {
+  const { data: me } = await supabase
+    .from("conversation_participants").select("is_muted, cleared_at")
+
+    .eq("conversation_id", conversationId).eq("user_id", userId).maybeSingle();
+  if (!me) return { unauthorized: true as const };
+
+  const { data: others } = await supabase
+    .from("conversation_participants").select("user_id")
+    .eq("conversation_id", conversationId).neq("user_id", userId);
+  const peerId: number | null = others?.[0]?.user_id ?? null;
+
+  let lastSeen: string | null = null;
+  if (peerId && !(await isBlockedEitherWay(supabase, userId, peerId))) {
+    const { data: pr } = await supabase
+      .from("user_presence").select("updated_at").eq("user_id", peerId).maybeSingle();
+    if (pr?.updated_at) lastSeen = new Date(asUtcMs(pr.updated_at)).toISOString();
+  }
+
+  const out: any = { is_muted: me.is_muted ?? false, peer_last_seen_at: lastSeen };
+
+  if (withMedia) {
+    const { data: rows, error } = await supabase
+      .from("messages")
+      .select(`id, type, body, media_key, media_type, created_at, sender_id, deleted_for_sender,
+        sharedPost:posts(*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar), listingDetail:listing_details(*), media:post_media(*))`)
+      .eq("conversation_id", conversationId)
+      .gt("created_at", me.cleared_at ?? "1970-01-01T00:00:00Z")
+      .is("deleted_at", null)
+      .or("media_key.not.is.null,shared_post_id.not.is.null")
+      .order("id", { ascending: false })
+      .limit(120);
+    if (error) throw error;
+
+    out.items = (rows ?? [])
+      .filter((r: any) => !(r.deleted_for_sender && r.sender_id === userId))
+
+      .map((r: any) => {
+        if (r.media_key) {
+          const kind = r.type === "video" ? "video" : r.type === "file" ? "file" : "image";
+          return { message_id: r.id, kind, url: resolveAvatarUrl(r.media_key), name: r.body ?? null, created_at: r.created_at };
+        }
+        const sp = r.sharedPost;
+        if (!sp || sp.type === "story" || !sp.is_active || sp.deleted_at) return null;
+        return { message_id: r.id, kind: "post", created_at: r.created_at, post: formatSharedPost(sp) };
+      })
+      .filter(Boolean);
+  }
+
+  return out;
 }

@@ -2,7 +2,7 @@
 import { serviceClient, requireAuth, AuthError } from "../_shared/auth.ts";
 import { json, handleCors } from "../_shared/response.ts";
 import { getUserReposts } from "../_shared/services/userService.ts";
-import { formatPost, getLikedIds } from "../_shared/services/feedService.ts";
+import { formatPost, getLikedIds, getBookmarkedIds } from "../_shared/services/feedService.ts";
 
 const CDN_BASE = Deno.env.get("CDN_BASE_URL") ?? "";
 
@@ -22,6 +22,7 @@ Deno.serve(async (req) => {
 
     const ids = result.rows.map((r: any) => r.post.id);
     const likedSet = await getLikedIds(supabase, userId, ids);
+    const bookmarkedSet = await getBookmarkedIds(supabase, userId, ids);
 
     // Reposted-by-the-VIEWER (not the profile owner), so the icon state is right.
     const { data: mine } = ids.length
@@ -31,7 +32,7 @@ Deno.serve(async (req) => {
 
     const data = await Promise.all(result.rows.map(async (r: any) => {
       r.post._reposted = mySet.has(r.post.id);
-      const formatted = await formatPost(supabase, r.post, CDN_BASE, likedSet.has(r.post.id));
+      const formatted = await formatPost(supabase, r.post, CDN_BASE, likedSet.has(r.post.id), bookmarkedSet.has(r.post.id));
       return { ...formatted, reposted_at: r.created_at ?? null };
     }));
 

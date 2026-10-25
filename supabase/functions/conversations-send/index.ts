@@ -17,6 +17,7 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
     const result = await sendMessage(supabase, conversationId, userId, body, CDN_BASE);
+    if ("invalidMedia" in result) return json({ message: "Invalid media." }, 422);
     if ("blocked" in result) return json({ message: "You can't message this user." }, 403);
     if ("requestLimitReached" in result) return json({ message: "Message request limit reached — wait for a response before sending more." }, 429);
     if ("unauthorized" in result) return json({ message: "Unauthorized." }, 403);

@@ -45,20 +45,57 @@ async function getAccessToken(): Promise<string> {
   return cachedToken.value;
 }
 
-export interface PushPayload { title: string; body: string; data: Record<string, string> }
+export interface PushPayload {
+  title: string;
+  body: string;
+  data: Record<string, string>;
+  web?: { title: string; body: string };
+}
 
-// ── Send ────────────────────────────────────────────────────────────────────
 export interface PushResult { devices: number; delivered: number; retryable: number; dead: number }
 
 const TEMP_STATUS = new Set(["UNAVAILABLE", "INTERNAL", "QUOTA_EXCEEDED", "DEADLINE_EXCEEDED"]);
 const DEAD_STATUS = new Set(["UNREGISTERED", "NOT_FOUND", "INVALID_ARGUMENT"]);
+
+function buildMessage(
+  device: { push_token: string; push_platform: string | null },
+  payload: PushPayload,
+  data: Record<string, string>,
+  tag: string | undefined,
+) {
+  if (device.push_platform === "web") {
+    const web = payload.web ?? { title: payload.title, body: payload.body };
+    const wd: Record<string, string> = { ...data, title: web.title };
+    if (web.body) wd.body = web.body;
+    return {
+      message: {
+        token: device.push_token,
+        data: wd,
+        webpush: { headers: { TTL: "86400", Urgency: data.type === "message" ? "high" : "normal" } },
+      },
+    };
+  }
+  return {
+    message: {
+      token: device.push_token,
+      notification: { title: payload.title, body: payload.body },
+      data,
+      android: { notification: { channel_id: "anaija_default_channel", image: data.image, tag } },
+      apns: {
+        headers: tag ? { "apns-collapse-id": tag.slice(0, 60) } : undefined,
+        payload: { aps: { "mutable-content": 1 } },
+        fcm_options: data.image ? { image: data.image } : undefined,
+      },
+    },
+  };
+}
 
 export async function sendPushToUser(
   supabase: SupabaseClient, userId: number, payload: PushPayload, opts: { tag?: string } = {},
 ): Promise<PushResult> {
   const result: PushResult = { devices: 0, delivered: 0, retryable: 0, dead: 0 };
   const { data: devices, error } = await supabase
-    .from("user_devices").select("id, push_token").eq("user_id", userId).eq("push_enabled", true);
+    .from("user_devices").select("id, push_token, push_platform").eq("user_id", userId).eq("push_enabled", true);
   if (error) throw error;
   if (!devices?.length) return result;
   result.devices = devices.length;
@@ -69,19 +106,7 @@ export async function sendPushToUser(
   if (tag) data.tag = tag;
 
   await Promise.all(devices.map(async (device: any) => {
-    const message = {
-      message: {
-        token: device.push_token,
-        notification: { title: payload.title, body: payload.body },
-        data,
-        android: { notification: { channel_id: "anaija_default_channel", image: data.image, tag } },
-        apns: {
-          headers: tag ? { "apns-collapse-id": tag.slice(0, 60) } : undefined,
-          payload: { aps: { "mutable-content": 1 } },
-          fcm_options: data.image ? { image: data.image } : undefined,
-        },
-      },
-    };
+    const message = buildMessage(device, payload, data, tag);
     try {
       const res = await fetch(FCM_SEND_URL, {
         method: "POST",

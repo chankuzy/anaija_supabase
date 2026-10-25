@@ -123,6 +123,7 @@ export async function formatPost(
     comments_count: post.comments_count,
     shares_count: post.shares_count,
     reposts_count: post.reposts_count ?? 0,
+    views_count: post.views_count ?? 0,
     bookmarks_count: post.bookmarks_count ?? 0,
     is_liked: isLiked,
     is_bookmarked: isBookmarked,
@@ -161,6 +162,7 @@ export async function formatListing(
     contact_preference: d.contact_preference,
     contact_phone: d.contact_phone,
     pickup_info: d.pickup_info,
+    location_info: d.location_info ?? null,
     quantity: d.quantity,
     views_count: d.views_count,
     inquiries_count: d.inquiries_count,
@@ -248,7 +250,7 @@ export async function formatStory(
     audio,
     author,
     created_at: post.created_at,
-    source_post: await loadStorySource(supabase, post),
+    source_post: (await loadStorySourceFull(supabase, post, cdnBase)) ?? (await loadStorySource(supabase, post)),
   };
 }
 
@@ -589,4 +591,53 @@ export async function getStoriesForUser(supabase: SupabaseClient, userId: number
   );
 
   return groups;
+}
+
+export async function getRepostedIds(supabase: SupabaseClient, userId: number, postIds: number[]): Promise<Set<number>> {
+  if (!postIds.length) return new Set();
+  const { data } = await supabase.from("reposts").select("post_id").eq("user_id", userId).in("post_id", postIds);
+  return new Set((data ?? []).map((r: any) => r.post_id));
+}
+
+
+/** Full source of a story made via "add to story": media list, slideshow,
+ *  audio and listing price, so the viewer can show it in a frame. */
+export async function loadStorySourceFull(supabase: SupabaseClient, post: any, cdnBase: string) {
+  const sourceId = Number(post?.context?.source_post_id);
+  if (!Number.isInteger(sourceId) || sourceId <= 0) return null;
+
+  const { data: src, error } = await supabase
+    .from("posts")
+    .select("*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar), media:post_media(*), listingDetail:listing_details(*)")
+    .eq("id", sourceId)
+    .eq("is_active", true)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (error || !src) return null;
+
+  await batchAttachAudio(supabase, [src]);
+
+  // Non-public sources only expose the one item the story already shows.
+  const isPublic = (src.visibility ?? "public") === "public";
+  const sorted = [...(src.media ?? [])]
+    .filter((m: any) => m.media_type === "image" || m.media_type === "video")
+    .sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  src.media = isPublic ? sorted : sorted.slice(0, 1);
+
+  const base: any = await formatPost(supabase, src, cdnBase);
+  const d = Array.isArray(src.listingDetail) ? src.listingDetail[0] : src.listingDetail;
+
+  return {
+    id: src.id,
+    type: src.type,
+    caption: src.caption,
+    media: base.media,
+    slideshow: isPublic ? base.slideshow : { enabled: false },
+    audio: base.audio,
+    listing: d ? {
+      formatted_price: (d.price_minor / 100).toLocaleString(),
+      price_type: d.price_type,
+      status: d.status,
+    } : null,
+  };
 }

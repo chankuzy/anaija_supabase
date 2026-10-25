@@ -35,7 +35,7 @@ Deno.serve(async (req) => {
     // Stories are not shareable links and never count.
     if (post.type === "story") return json({ shares_count: current, share_url: null });
 
-    const shareUrl = post.type === "listing" ? `${APP_URL}/marketplace/${postId}` : `${APP_URL}/posts/${postId}`;
+    const shareUrl = post.type === "listing" ? `${APP_URL}/l/${postId}` : `${APP_URL}/p/${postId}`;
 
     // Sharing your own post is allowed but never counts.
     if (post.user_id === userId) return json({ shares_count: current, share_url: shareUrl });

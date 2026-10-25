@@ -2,7 +2,7 @@
 import { serviceClient, requireAuth, AuthError } from "../_shared/auth.ts";
 import { json, handleCors } from "../_shared/response.ts";
 import { getUserPosts } from "../_shared/services/userService.ts";
-import { formatPost } from "../_shared/services/feedService.ts";
+import { formatPost, getLikedIds, getBookmarkedIds, getRepostedIds } from "../_shared/services/feedService.ts";
 
 const CDN_BASE = Deno.env.get("CDN_BASE_URL") ?? "";
 
@@ -20,11 +20,15 @@ Deno.serve(async (req) => {
     const result = await getUserPosts(supabase, username, cursor);
     if ("notFound" in result) return json({ message: "Not found." }, 404);
 
-    const { data: liked } = await supabase.from("post_likes").select("post_id")
-      .eq("user_id", userId).in("post_id", result.page.map((p: any) => p.id));
-    const likedSet = new Set((liked ?? []).map((r: any) => r.post_id));
+    const ids = result.page.map((p: any) => p.id);
+    const [likedSet, bookmarkedSet, repostedSet] = await Promise.all([
+      getLikedIds(supabase, userId, ids),
+      getBookmarkedIds(supabase, userId, ids),
+      getRepostedIds(supabase, userId, ids),
+    ]);
 
-    const data = await Promise.all(result.page.map((p: any) => formatPost(supabase, p, CDN_BASE, likedSet.has(p.id))));
+    const data = await Promise.all(result.page.map((p: any) =>
+      formatPost(supabase, Object.assign(p, { _reposted: repostedSet.has(p.id) }), CDN_BASE, likedSet.has(p.id), bookmarkedSet.has(p.id))));
 
     return json({
       data,

@@ -2,7 +2,8 @@
 import { serviceClient, requireAuth, AuthError } from "../_shared/auth.ts";
 import { json, handleCors } from "../_shared/response.ts";
 import { listBookmarks } from "../_shared/services/interactionService.ts";
-import { formatPost, getLikedIds } from "../_shared/services/feedService.ts";
+import { batchAttachAudio } from "../_shared/services/audioAssetService.ts";
+import { formatPost, getLikedIds, getRepostedIds } from "../_shared/services/feedService.ts";
 
 const CDN_BASE = Deno.env.get("CDN_BASE_URL") ?? "";
 
@@ -18,15 +19,17 @@ Deno.serve(async (req) => {
     const page = parseInt(url.searchParams.get("page") ?? "1", 10);
 
     const { rows, hasMore } = await listBookmarks(supabase, userId, type, page);
+    await batchAttachAudio(supabase, rows.map((b: any) => b.post));
 
     // Every row here is, by definition, bookmarked by this viewer — no need
     // to re-query bookmark state. Still need real like state per post though.
     const postIds = rows.map((b: any) => b.post.id);
     const likedSet = await getLikedIds(supabase, userId, postIds);
+    const repostedSet = await getRepostedIds(supabase, userId, postIds);
 
     const data = await Promise.all(rows.map(async (b: any) => ({
       bookmarked_at: b.created_at,
-      post: await formatPost(supabase, b.post, CDN_BASE, likedSet.has(b.post.id), true),
+      post: await formatPost(supabase, Object.assign(b.post, { _reposted: repostedSet.has(b.post.id) }), CDN_BASE, likedSet.has(b.post.id), true),
     })));
 
     return json({ data, has_more: hasMore });

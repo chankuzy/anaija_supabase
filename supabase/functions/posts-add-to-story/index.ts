@@ -27,7 +27,7 @@ Deno.serve(async (req) => {
     const { data: source, error } = await supabase
       .from("posts")
       .select(
-        "id, user_id, type, caption, visibility, allow_story_sharing, is_active, deleted_at, processing_status, audio_asset_id, audio_config, media:post_media(media_type, storage_key, thumbnail_key, width, height, duration_seconds, aspect_ratio, size_bytes, mime_type, blurhash, dominant_color, sort_order)",
+        "id, user_id, type, caption, visibility, allow_story_sharing, expires_at, context, is_active, deleted_at, processing_status, audio_asset_id, audio_config, media:post_media(media_type, storage_key, thumbnail_key, width, height, duration_seconds, aspect_ratio, size_bytes, mime_type, blurhash, dominant_color, sort_order)",
       )
       .eq("id", postId)
       .maybeSingle();
@@ -37,11 +37,15 @@ Deno.serve(async (req) => {
     if (!source || !source.is_active || source.deleted_at || source.processing_status !== "ready") {
       return json({ message: "Not found." }, 404);
     }
-    if (source.type === "story") {
-      return json({ message: "This is already a story." }, 422);
-    }
-
     const isOwn = source.user_id === userId;
+    const isStorySource = source.type === "story";
+    if (isStorySource) {
+      // Story reshare: someone else's live story can be added to your own story.
+      if (isOwn) return json({ message: "This is already your story." }, 422);
+      if (source.expires_at && new Date(source.expires_at) < new Date()) {
+        return json({ message: "Story expired." }, 410);
+      }
+    }
     if (!isOwn) {
       if (await isBlockedEitherWay(supabase, userId, source.user_id)) {
         return json({ message: "Not found." }, 404);
@@ -110,7 +114,7 @@ Deno.serve(async (req) => {
     {
       const { data: cur } = await supabase.from("posts").select("context").eq("id", story.id).maybeSingle();
       const { error: ctxErr } = await supabase.from("posts")
-        .update({ context: { ...(cur?.context ?? {}), source_post_id: source.id } })
+        .update({ context: { ...(cur?.context ?? {}), ...(isStorySource ? { source_post_id: source.context?.source_post_id ?? null, reshared_from_story_id: source.id, reshared_from_user_id: source.user_id } : { source_post_id: source.id }) } })
         .eq("id", story.id);
       if (ctxErr) console.error("story source link failed", ctxErr);
     }

@@ -1010,6 +1010,12 @@ entrypoint = "./functions/messages-destroy/index.ts"
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/messages-destroy/*.html" ]
 
+[functions.messages-update]
+enabled = true
+verify_jwt = false
+import_map = "./functions/messages-update/deno.json"
+entrypoint = "./functions/messages-update/index.ts"
+
 [functions.search]
 enabled = true
 verify_jwt = false
@@ -1465,3 +1471,15 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/feed-feedback/deno.json"
 entrypoint = "./functions/feed-feedback/index.ts"
+
+[functions.feed-debug]
+enabled = true
+verify_jwt = false
+import_map = "./functions/feed-debug/deno.json"
+entrypoint = "./functions/feed-debug/index.ts"
+
+[functions.public-post]
+verify_jwt = false
+
+[functions.public-profile]
+verify_jwt = false

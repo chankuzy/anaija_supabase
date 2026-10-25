@@ -61,15 +61,42 @@ async function loadProfile(supabase: SupabaseClient, viewerId: number): Promise<
 }
 
 async function buildRanked(
-  supabase: SupabaseClient, viewerId: number | null, cfg: FeedConfig, seed: string, exclude: Set<number>,
+  supabase: SupabaseClient, viewerId: number | null, cfg: FeedConfig, seed: string, exclude: Set<number>, resurface = false,
 ): Promise<{ items: SessionItem[]; poolSize: number }> {
   const mode = viewerId === null ? "guest" : "auth";
   const [pool, profile] = await Promise.all([
     loadPool(supabase, viewerId, seed),
     viewerId === null ? Promise.resolve(EMPTY_PROFILE) : loadProfile(supabase, viewerId),
   ]);
-  const ranked = rankCandidates(pool.filter((c) => !exclude.has(c.post_id)), profile, cfg, { mode, seed });
-  const { items } = compose(ranked, cfg, { mode, seed });
+  const usable = pool.filter((c) => !exclude.has(c.post_id));
+  const older: Candidate[] = [];  // seen before, outside the recent-delivery window
+  const recent: Candidate[] = []; // delivered in the last live sessions: shown last, only if needed
+  // First build only: a viewer who has seen everything inside the normal windows still gets a feed.
+  // Seen/consumed/old posts are re-admitted; negatives, engaged posts, hides, blocks and visibility stay out.
+  if (resurface && viewerId !== null && usable.length < cfg.compose.min_pool_relax) {
+    const { data: raw } = await supabase.rpc("feed_cfg");
+    const base = (raw ?? {}) as Record<string, any>;
+    const wide = 365;
+    const relaxed = { ...base, candidates: { ...(base.candidates ?? {}), seen_days: 0, consumed_days: 0,
+      followed_days: wide, institution_days: wide, interest_days: wide, creator_days: wide,
+      wide_days: wide, listing_days: wide, explore_days: wide } };
+    const { data, error } = await supabase.rpc("feed_candidate_pool", { p_viewer: viewerId, p_seed: seed, p_cfg: relaxed });
+    if (error) console.error("[feed] resurface pool failed:", error.message);
+    else {
+      const have = new Set(usable.map((c) => c.post_id));
+      let added = 0;
+      for (const c of (data ?? []) as Candidate[]) {
+        if (have.has(c.post_id)) continue;
+        have.add(c.post_id);
+        if (exclude.has(c.post_id)) { recent.push(c); continue; }
+        older.push(c); added++;
+      }
+      console.log(`[feed] resurface viewer=${viewerId} unseen=${usable.length} older=${older.length} recent=${recent.length}`);
+    }
+  }
+  // Tiers keep the order honest: unseen first, then older seen posts, then what was delivered moments ago.
+  const items = [usable, older, recent].flatMap((tier) =>
+    tier.length ? compose(rankCandidates(tier, profile, cfg, { mode, seed }), cfg, { mode, seed }).items : []);
   return {
     poolSize: pool.length,
     items: items.map((p): SessionItem => ({
@@ -107,7 +134,7 @@ async function recentDelivered(supabase: SupabaseClient, userId: number): Promis
 }
 
 // ─── hydration (re-validates eligibility/visibility at delivery time) ───────────────────────────────
-async function hydratePosts(
+export async function hydratePosts(
   supabase: SupabaseClient, viewerId: number | null, ids: number[], cdnBase: string,
 ): Promise<Map<number, unknown>> {
   const out = new Map<number, unknown>();
@@ -202,7 +229,7 @@ export async function getFeed(req: FeedRequest): Promise<FeedResult> {
     const seed = crypto.randomUUID();
     const exclude = viewerId !== null && scope === "for_you" ? await recentDelivered(supabase, viewerId) : new Set<number>();
     const built = scope === "for_you"
-      ? await buildRanked(supabase, viewerId, cfg, seed, exclude)
+      ? await buildRanked(supabase, viewerId, cfg, seed, exclude, true)
       : await buildChrono(supabase, viewerId as number, scope);
     const id = await createSession(supabase, {
       userId: viewerId, mode, scope, items: built.items, configVersion: cfg.version,
