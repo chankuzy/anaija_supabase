@@ -1036,3 +1036,9 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/users/deno.json"
 entrypoint = "./functions/users/index.ts"
+
+[functions.conversations]
+enabled = true
+verify_jwt = false
+import_map = "./functions/conversations/deno.json"
+entrypoint = "./functions/conversations/index.ts"
