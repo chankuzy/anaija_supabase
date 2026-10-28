@@ -509,50 +509,6 @@ entrypoint = "./functions/storage-sign-upload/index.ts"
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/storage-sign-upload/*.html" ]
 
-[functions.posts-store]
-enabled = true
-verify_jwt = false
-import_map = "./functions/posts-store/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/posts-store/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/posts-store/*.html" ]
-
-[functions.posts-show]
-enabled = true
-verify_jwt = false
-import_map = "./functions/posts-show/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/posts-show/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/posts-show/*.html" ]
-
-[functions.posts-update]
-enabled = true
-verify_jwt = false
-import_map = "./functions/posts-update/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/posts-update/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/posts-update/*.html" ]
-
-[functions.posts-destroy]
-enabled = true
-verify_jwt = false
-import_map = "./functions/posts-destroy/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/posts-destroy/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/posts-destroy/*.html" ]
-
 [functions.feed]
 enabled = true
 verify_jwt = false
@@ -563,72 +519,6 @@ entrypoint = "./functions/feed/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/feed/*.html" ]
-
-[functions.posts-like]
-enabled = true
-verify_jwt = false
-import_map = "./functions/posts-like/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/posts-like/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/posts-like/*.html" ]
-
-[functions.posts-bookmark]
-enabled = true
-verify_jwt = false
-import_map = "./functions/posts-bookmark/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/posts-bookmark/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/posts-bookmark/*.html" ]
-
-[functions.bookmarks-list]
-enabled = true
-verify_jwt = false
-import_map = "./functions/bookmarks-list/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/bookmarks-list/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/bookmarks-list/*.html" ]
-
-[functions.posts-view]
-enabled = true
-verify_jwt = false
-import_map = "./functions/posts-view/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/posts-view/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/posts-view/*.html" ]
-
-[functions.posts-share]
-enabled = true
-verify_jwt = false
-import_map = "./functions/posts-share/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/posts-share/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/posts-share/*.html" ]
-
-[functions.posts-repost]
-enabled = true
-verify_jwt = false
-import_map = "./functions/posts-repost/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/posts-repost/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/posts-repost/*.html" ]
 
 [functions.users-show]
 enabled = true
@@ -1214,12 +1104,6 @@ entrypoint = "./functions/notifications-preferences-update/index.ts"
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/notifications-preferences-update/*.html" ]
 
-[functions.posts-liked]
-enabled = true
-verify_jwt = false
-import_map = "./functions/posts-liked/deno.json"
-entrypoint = "./functions/posts-liked/index.ts"
-
 [functions.conversations-respond]
 enabled = true
 verify_jwt = false
@@ -1247,12 +1131,6 @@ verify_jwt = false
 
 [functions.reports-store]
 verify_jwt = false
-
-[functions.posts-add-to-story]
-enabled = true
-verify_jwt = false
-import_map = "./functions/posts-add-to-story/deno.json"
-entrypoint = "./functions/posts-add-to-story/index.ts"
 
 [functions.content-settings]
 enabled = true
@@ -1330,12 +1208,6 @@ entrypoint = "./functions/conversations-info/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/discover-events/index.ts"
-
-[functions.posts-pin]
-enabled = true
-verify_jwt = false
-import_map = "./functions/posts-pin/deno.json"
-entrypoint = "./functions/posts-pin/index.ts"
 
 [functions.polls]
 enabled = true
