@@ -454,39 +454,6 @@ entrypoint = "./functions/social-auth/index.ts"
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/social-auth/*.html" ]
 
-[functions.profile-get]
-enabled = true
-verify_jwt = false
-import_map = "./functions/profile-get/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/profile-get/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/profile-get/*.html" ]
-
-[functions.profile-update]
-enabled = true
-verify_jwt = false
-import_map = "./functions/profile-update/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/profile-update/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/profile-update/*.html" ]
-
-[functions.username-check]
-enabled = true
-verify_jwt = false
-import_map = "./functions/username-check/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/username-check/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/username-check/*.html" ]
-
 [functions.dev-login]
 enabled = true
 verify_jwt = false
@@ -519,83 +486,6 @@ entrypoint = "./functions/feed/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/feed/*.html" ]
-
-[functions.users-show]
-enabled = true
-verify_jwt = false
-import_map = "./functions/users-show/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/users-show/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/users-show/*.html" ]
-
-[functions.users-posts]
-enabled = true
-verify_jwt = false
-import_map = "./functions/users-posts/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/users-posts/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/users-posts/*.html" ]
-
-[functions.users-listings]
-enabled = true
-verify_jwt = false
-import_map = "./functions/users-listings/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/users-listings/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/users-listings/*.html" ]
-
-[functions.users-stories]
-enabled = true
-verify_jwt = false
-import_map = "./functions/users-stories/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/users-stories/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/users-stories/*.html" ]
-
-[functions.users-follow]
-enabled = true
-verify_jwt = false
-import_map = "./functions/users-follow/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/users-follow/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/users-follow/*.html" ]
-
-[functions.users-followers]
-enabled = true
-verify_jwt = false
-import_map = "./functions/users-followers/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/users-followers/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/users-followers/*.html" ]
-
-[functions.users-following]
-enabled = true
-verify_jwt = false
-import_map = "./functions/users-following/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/users-following/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/users-following/*.html" ]
 
 [functions.devices-register]
 enabled = true
@@ -939,28 +829,6 @@ entrypoint = "./functions/stories-reply/index.ts"
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/stories-reply/*.html" ]
 
-[functions.profile-complete]
-enabled = true
-verify_jwt = false
-import_map = "./functions/profile-complete/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/profile-complete/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/profile-complete/*.html" ]
-
-[functions.profile-avatar]
-enabled = true
-verify_jwt = false
-import_map = "./functions/profile-avatar/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/profile-avatar/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/profile-avatar/*.html" ]
-
 [functions.audio-assets-store]
 enabled = true
 verify_jwt = false
@@ -1027,50 +895,6 @@ entrypoint = "./functions/communities-join/index.ts"
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/communities-join/*.html" ]
 
-[functions.user-highlights]
-enabled = true
-verify_jwt = false
-import_map = "./functions/user-highlights/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/user-highlights/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/user-highlights/*.html" ]
-
-[functions.user-highlights-store]
-enabled = true
-verify_jwt = false
-import_map = "./functions/user-highlights-store/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/user-highlights-store/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/user-highlights-store/*.html" ]
-
-[functions.profile-cover]
-enabled = true
-verify_jwt = false
-import_map = "./functions/profile-cover/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/profile-cover/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/profile-cover/*.html" ]
-
-[functions.user-highlight-posts]
-enabled = true
-verify_jwt = false
-import_map = "./functions/user-highlight-posts/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/user-highlight-posts/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/user-highlight-posts/*.html" ]
-
 [functions.presence-heartbeat]
 enabled = true
 verify_jwt = false
@@ -1115,20 +939,6 @@ entrypoint = "./functions/conversations-respond/index.ts"
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/conversations-respond/*.html" ]
 
-[functions.users-block]
-enabled = true
-verify_jwt = false
-import_map = "./functions/users-block/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/users-block/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/users-block/*.html" ]
-
-[functions.blocks-list]
-verify_jwt = false
-
 [functions.reports-store]
 verify_jwt = false
 
@@ -1143,12 +953,6 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/follows-notify/deno.json"
 entrypoint = "./functions/follows-notify/index.ts"
-
-[functions.users-reposts]
-enabled = true
-verify_jwt = false
-import_map = "./functions/users-reposts/deno.json"
-entrypoint = "./functions/users-reposts/index.ts"
 
 [functions.activity]
 enabled = true
