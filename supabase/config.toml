@@ -1226,3 +1226,9 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/posts/deno.json"
 entrypoint = "./functions/posts/index.ts"
+
+[functions.users]
+enabled = true
+verify_jwt = false
+import_map = "./functions/users/deno.json"
+entrypoint = "./functions/users/index.ts"
