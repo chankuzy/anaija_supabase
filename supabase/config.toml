@@ -586,95 +586,6 @@ entrypoint = "./functions/marketplace-inquiries/index.ts"
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/marketplace-inquiries/*.html" ]
 
-[functions.conversations-inbox]
-enabled = true
-verify_jwt = false
-import_map = "./functions/conversations-inbox/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/conversations-inbox/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/conversations-inbox/*.html" ]
-
-[functions.conversations-open]
-enabled = true
-verify_jwt = false
-import_map = "./functions/conversations-open/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/conversations-open/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/conversations-open/*.html" ]
-
-[functions.conversations-messages]
-enabled = true
-verify_jwt = false
-import_map = "./functions/conversations-messages/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/conversations-messages/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/conversations-messages/*.html" ]
-
-[functions.conversations-send]
-enabled = true
-verify_jwt = false
-import_map = "./functions/conversations-send/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/conversations-send/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/conversations-send/*.html" ]
-
-[functions.conversations-mute]
-enabled = true
-verify_jwt = false
-import_map = "./functions/conversations-mute/deno.json"
-entrypoint = "./functions/conversations-mute/index.ts"
-
-[functions.messages-react]
-enabled = true
-verify_jwt = false
-import_map = "./functions/messages-react/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/messages-react/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/messages-react/*.html" ]
-
-[functions.messages-read]
-enabled = true
-verify_jwt = false
-import_map = "./functions/messages-read/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/messages-read/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/messages-read/*.html" ]
-
-[functions.messages-destroy]
-enabled = true
-verify_jwt = false
-import_map = "./functions/messages-destroy/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/messages-destroy/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/messages-destroy/*.html" ]
-
-[functions.messages-update]
-enabled = true
-verify_jwt = false
-import_map = "./functions/messages-update/deno.json"
-entrypoint = "./functions/messages-update/index.ts"
-
 [functions.search]
 enabled = true
 verify_jwt = false
@@ -928,17 +839,6 @@ entrypoint = "./functions/notifications-preferences-update/index.ts"
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/notifications-preferences-update/*.html" ]
 
-[functions.conversations-respond]
-enabled = true
-verify_jwt = false
-import_map = "./functions/conversations-respond/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/conversations-respond/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/conversations-respond/*.html" ]
-
 [functions.reports-store]
 verify_jwt = false
 
@@ -995,18 +895,6 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/publishing-capabilities/deno.json"
 entrypoint = "./functions/publishing-capabilities/index.ts"
-
-[functions.conversations-clear]
-enabled = true
-verify_jwt = false
-import_map = "./functions/conversations-clear/deno.json"
-entrypoint = "./functions/conversations-clear/index.ts"
-
-[functions.conversations-info]
-enabled = true
-verify_jwt = false
-import_map = "./functions/conversations-info/deno.json"
-entrypoint = "./functions/conversations-info/index.ts"
 
 [functions.discover-events]
 enabled = true
