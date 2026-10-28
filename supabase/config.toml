@@ -509,83 +509,6 @@ entrypoint = "./functions/devices-unregister/index.ts"
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/devices-unregister/*.html" ]
 
-[functions.marketplace-index]
-enabled = true
-verify_jwt = false
-import_map = "./functions/marketplace-index/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/marketplace-index/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/marketplace-index/*.html" ]
-
-[functions.marketplace-show]
-enabled = true
-verify_jwt = false
-import_map = "./functions/marketplace-show/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/marketplace-show/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/marketplace-show/*.html" ]
-
-[functions.marketplace-inquire]
-enabled = true
-verify_jwt = false
-import_map = "./functions/marketplace-inquire/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/marketplace-inquire/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/marketplace-inquire/*.html" ]
-
-[functions.marketplace-sold]
-enabled = true
-verify_jwt = false
-import_map = "./functions/marketplace-sold/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/marketplace-sold/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/marketplace-sold/*.html" ]
-
-[functions.marketplace-reserve]
-enabled = true
-verify_jwt = false
-import_map = "./functions/marketplace-reserve/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/marketplace-reserve/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/marketplace-reserve/*.html" ]
-
-[functions.marketplace-available]
-enabled = true
-verify_jwt = false
-import_map = "./functions/marketplace-available/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/marketplace-available/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/marketplace-available/*.html" ]
-
-[functions.marketplace-inquiries]
-enabled = true
-verify_jwt = false
-import_map = "./functions/marketplace-inquiries/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/marketplace-inquiries/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/marketplace-inquiries/*.html" ]
-
 [functions.search]
 enabled = true
 verify_jwt = false
@@ -662,39 +585,6 @@ entrypoint = "./functions/institutions-join/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/institutions-join/*.html" ]
-
-[functions.hashtags-trending]
-enabled = true
-verify_jwt = false
-import_map = "./functions/hashtags-trending/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/hashtags-trending/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/hashtags-trending/*.html" ]
-
-[functions.hashtags-posts]
-enabled = true
-verify_jwt = false
-import_map = "./functions/hashtags-posts/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/hashtags-posts/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/hashtags-posts/*.html" ]
-
-[functions.hashtags-listings]
-enabled = true
-verify_jwt = false
-import_map = "./functions/hashtags-listings/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/hashtags-listings/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/hashtags-listings/*.html" ]
 
 [functions.stories-index]
 enabled = true
