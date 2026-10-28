@@ -930,3 +930,15 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/conversations/deno.json"
 entrypoint = "./functions/conversations/index.ts"
+
+[functions.marketplace]
+enabled = true
+verify_jwt = false
+import_map = "./functions/marketplace/deno.json"
+entrypoint = "./functions/marketplace/index.ts"
+
+[functions.hashtags]
+enabled = true
+verify_jwt = false
+import_map = "./functions/hashtags/deno.json"
+entrypoint = "./functions/hashtags/index.ts"
