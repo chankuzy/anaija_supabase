@@ -707,61 +707,6 @@ entrypoint = "./functions/users-following/index.ts"
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/users-following/*.html" ]
 
-[functions.comments-list]
-enabled = true
-verify_jwt = false
-import_map = "./functions/comments-list/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/comments-list/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/comments-list/*.html" ]
-
-[functions.comments-store]
-enabled = true
-verify_jwt = false
-import_map = "./functions/comments-store/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/comments-store/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/comments-store/*.html" ]
-
-[functions.comments-replies]
-enabled = true
-verify_jwt = false
-import_map = "./functions/comments-replies/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/comments-replies/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/comments-replies/*.html" ]
-
-[functions.comments-destroy]
-enabled = true
-verify_jwt = false
-import_map = "./functions/comments-destroy/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/comments-destroy/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/comments-destroy/*.html" ]
-
-[functions.comments-like]
-enabled = true
-verify_jwt = false
-import_map = "./functions/comments-like/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/comments-like/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/comments-like/*.html" ]
-
 [functions.devices-register]
 enabled = true
 verify_jwt = false
@@ -1170,17 +1115,6 @@ entrypoint = "./functions/discover/index.ts"
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/discover/*.html" ]
 
-[functions.communities-index]
-enabled = true
-verify_jwt = false
-import_map = "./functions/communities-index/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/communities-index/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/communities-index/*.html" ]
-
 [functions.communities-show]
 enabled = true
 verify_jwt = false
@@ -1380,11 +1314,6 @@ verify_jwt = false
 import_map = "./functions/publishing-capabilities/deno.json"
 entrypoint = "./functions/publishing-capabilities/index.ts"
 
-[functions.comments-locate]
-enabled = true
-verify_jwt = false
-entrypoint = "./functions/comments-locate/index.ts"
-
 [functions.conversations-clear]
 enabled = true
 verify_jwt = false
@@ -1419,3 +1348,9 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/comments/deno.json"
 entrypoint = "./functions/comments/index.ts"
+
+[functions.posts]
+enabled = true
+verify_jwt = false
+import_map = "./functions/posts/deno.json"
+entrypoint = "./functions/posts/index.ts"
