@@ -139,6 +139,7 @@ export async function formatPost(
     media,
     slideshow: post.slideshow_config ?? { enabled: false, interval_ms: 2800, transition: 'fade' },
     audio,
+    content: post.content ?? null,
   };
 }
 

@@ -1,6 +1,7 @@
 /// <reference path="../_shared/deno-shim.d.ts" />
 // Public/guest feed. No token is read, ever: guests get contextual ranking only, never personalisation,
 // even if a stale token is attached. Eligibility is enforced in SQL (visibility='public' AND public_since).
+// scope=reels serves the immersive surface (videos and audio-backed images only); anything else is for_you.
 import { serviceClient } from "../_shared/auth.ts";
 import { json, handleCors } from "../_shared/response.ts";
 import { getFeed } from "../_shared/feed/engine.ts";
@@ -30,8 +31,9 @@ Deno.serve(async (req) => {
 
   try {
     const q = new URL(req.url).searchParams;
+    const scope = q.get("scope") === "reels" ? "reels" : "for_you";
     const { body } = await getFeed({
-      supabase: serviceClient(), viewerId: null, scope: "for_you",
+      supabase: serviceClient(), viewerId: null, scope,
       cursor: q.get("cursor"), refresh: q.get("refresh") === "1", cdnBase: CDN_BASE,
     });
     const res = json(body);

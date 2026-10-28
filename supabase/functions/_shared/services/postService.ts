@@ -3,6 +3,8 @@ import { syncHashtags } from "./hashtagService.ts";
 import { batchAttachAudio } from "./audioAssetService.ts";
 import { MEDIA_LIMITS } from "../mediaLimits.ts";
 import { normalizeVisibility } from "../visibility.ts";
+import { prepareStructured, type Prepared } from "./contentKinds.ts";
+import { resolvePublisher } from "./contentAccess.ts";
 
 export const TYPE_POST = "post";
 export const TYPE_STORY = "story";
@@ -28,7 +30,7 @@ function resolveVisibility(v: unknown): string {
 }
 
 interface MediaInput {
-  type: "video" | "image" | "audio";
+  type: "video" | "image" | "audio" | "document";
   storage_key: string;
   thumbnail_key?: string;
   width?: number;
@@ -79,6 +81,8 @@ interface CreatePostInput {
   allow_comments?: boolean;
   allow_story_sharing?: boolean;
   client_request_id?: string;
+  /** Structured payload for subtype poll | document | article | announcement. */
+  content?: Record<string, unknown>;
 }
 
 async function verifyMediaOwnership(supabase: SupabaseClient, userId: number, media: MediaInput[]) {
@@ -205,6 +209,23 @@ export async function createPost(
   }
 
   if (type === TYPE_LISTING) validateListing(input);
+
+  // Structured kinds (poll / document / article / announcement): validated and normalised in contentKinds.ts.
+  let structured: Extract<Prepared, { ok: true }> | null = null;
+  if (input.content !== undefined && input.content !== null) {
+    if (type !== TYPE_POST) throw new ValidationError({ content: "Structured content is only supported on posts." });
+    const prep = prepareStructured({ subtype: input.subtype, content: input.content, media: input.media }, Date.now());
+    if (prep && !prep.ok) throw new ValidationError(prep.errors);
+    if (prep && prep.ok) {
+      if (prep.subtype === "announcement") {
+        const pub = await resolvePublisher(supabase, userId, prep.publisherId);
+        if (!pub) throw new ValidationError({ publisher: "You are not authorised to publish as this identity." });
+        prep.content.publisher = { id: pub.id, name: pub.name, type: pub.type };
+        (prep as { institutionId?: number | null }).institutionId = pub.institution_id;
+      }
+      structured = prep;
+    }
+  }
   if (input.media?.length && !opts.trustedSource) await verifyMediaOwnership(supabase, userId, input.media);
 
   // ── AUDIO ASSET OWNERSHIP ENFORCEMENT ──
@@ -222,9 +243,9 @@ export async function createPost(
   const postData: Record<string, unknown> = {
     user_id: userId,
     type,
-    subtype: input.subtype ?? null,
+    subtype: structured?.subtype ?? input.subtype ?? null,
     listing_type: type === TYPE_LISTING ? (input.listing_type ?? "product") : null,
-    caption: input.caption ?? null,
+    caption: structured?.caption ?? input.caption ?? null,
     // Real now — this used to be hardcoded true whatever the client sent.
     allow_comments: typeof input.allow_comments === "boolean" ? input.allow_comments : true,
     // null = follow the author's account-wide setting (users.allow_story_sharing).
@@ -240,6 +261,7 @@ export async function createPost(
     audio_config: clampAudioConfig(type, input.audio),
     client_request_id: requestId,
   };
+  if (structured) postData.content = structured.content;
 
   if (type === TYPE_STORY) {
     const hours = input.expires_hours ?? 24;
@@ -255,6 +277,9 @@ export async function createPost(
       level: input.level ?? null,
     };
   }
+
+  const annInst = (structured as { institutionId?: number | null } | null)?.institutionId;
+  if (annInst) postData.context = { ...((postData.context as Record<string, unknown> | undefined) ?? {}), institution_id: annInst };
 
   if (input.latitude !== undefined) {
     postData.latitude = input.latitude;

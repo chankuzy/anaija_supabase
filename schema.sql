@@ -381,6 +381,7 @@ CREATE TABLE public.conversation_participants (
   updated_at timestamp without time zone DEFAULT now(),
   request_status character varying NOT NULL DEFAULT 'accepted'::character varying CHECK (request_status::text = ANY (ARRAY['pending'::text, 'accepted'::text, 'declined'::text])),
   requested_at timestamp without time zone,
+  cleared_at timestamp without time zone,
   CONSTRAINT conversation_participants_pkey PRIMARY KEY (id),
   CONSTRAINT conversation_participants_conversation_id_foreign FOREIGN KEY (conversation_id) REFERENCES public.conversations(id),
   CONSTRAINT conversation_participants_user_id_foreign FOREIGN KEY (user_id) REFERENCES public.users(id)
@@ -493,14 +494,6 @@ CREATE TABLE public.message_receipts (
   CONSTRAINT message_receipts_pkey PRIMARY KEY (id),
   CONSTRAINT message_receipts_message_id_foreign FOREIGN KEY (message_id) REFERENCES public.messages(id),
   CONSTRAINT message_receipts_user_id_foreign FOREIGN KEY (user_id) REFERENCES public.users(id)
-);
-CREATE TABLE public.message_deletions (
-  message_id bigint NOT NULL,
-  user_id bigint NOT NULL,
-  created_at timestamp without time zone DEFAULT now(),
-  CONSTRAINT message_deletions_pkey PRIMARY KEY (message_id, user_id),
-  CONSTRAINT message_deletions_message_id_foreign FOREIGN KEY (message_id) REFERENCES public.messages(id) ON DELETE CASCADE,
-  CONSTRAINT message_deletions_user_id_foreign FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE
 );
 CREATE TABLE public.comment_likes (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
@@ -788,7 +781,7 @@ CREATE TABLE public.feed_events (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   user_id bigint NOT NULL,
   event_id uuid NOT NULL,
-  kind text NOT NULL CHECK (kind = ANY (ARRAY['impression'::text, 'consume'::text, 'share'::text, 'profile_visit'::text, 'listing_open'::text, 'not_interested'::text, 'hide_creator'::text, 'follow_from_post'::text, 'like'::text, 'comment'::text, 'save'::text, 'repost'::text, 'follow'::text, 'suggestion_impression'::text, 'suggestion_open'::text, 'suggestion_follow'::text, 'suggestion_dismiss'::text])),
+  kind text NOT NULL CHECK (kind = ANY (ARRAY['impression'::text, 'consume'::text, 'share'::text, 'profile_visit'::text, 'listing_open'::text, 'not_interested'::text, 'hide_creator'::text, 'follow_from_post'::text, 'like'::text, 'comment'::text, 'save'::text, 'repost'::text, 'follow'::text, 'suggestion_impression'::text, 'open'::text, 'suggestion_open'::text, 'suggestion_follow'::text, 'suggestion_dismiss'::text])),
   origin text NOT NULL DEFAULT 'client'::text CHECK (origin = ANY (ARRAY['client'::text, 'server'::text])),
   post_id bigint,
   target_user_id bigint,
@@ -873,4 +866,34 @@ CREATE TABLE public.people_suggestions (
   CONSTRAINT people_suggestions_pkey PRIMARY KEY (user_id, target_id),
   CONSTRAINT people_suggestions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
   CONSTRAINT people_suggestions_target_id_fkey FOREIGN KEY (target_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.discover_exposures (
+  user_id bigint NOT NULL,
+  post_id bigint NOT NULL,
+  first_seen_at timestamp with time zone NOT NULL DEFAULT now(),
+  last_seen_at timestamp with time zone NOT NULL DEFAULT now(),
+  seen_count smallint NOT NULL DEFAULT 0,
+  opened_at timestamp with time zone,
+  open_count smallint NOT NULL DEFAULT 0,
+  src text,
+  CONSTRAINT discover_exposures_pkey PRIMARY KEY (user_id, post_id),
+  CONSTRAINT discover_exposures_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT discover_exposures_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.posts(id)
+);
+CREATE TABLE public.discover_post_stats (
+  post_id bigint NOT NULL,
+  impressions integer NOT NULL DEFAULT 0,
+  opens integer NOT NULL DEFAULT 0,
+  delivered integer NOT NULL DEFAULT 0,
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT discover_post_stats_pkey PRIMARY KEY (post_id),
+  CONSTRAINT discover_post_stats_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.posts(id)
+);
+CREATE TABLE public.message_deletions (
+  message_id bigint NOT NULL,
+  user_id bigint NOT NULL,
+  created_at timestamp without time zone DEFAULT now(),
+  CONSTRAINT message_deletions_pkey PRIMARY KEY (message_id, user_id),
+  CONSTRAINT message_deletions_message_id_fkey FOREIGN KEY (message_id) REFERENCES public.messages(id),
+  CONSTRAINT message_deletions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
 );

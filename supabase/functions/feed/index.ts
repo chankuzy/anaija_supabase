@@ -6,7 +6,7 @@ import { peopleProvider } from "../_shared/feed/people.ts";
 import { getFeedPage } from "../_shared/services/feedService.ts";
 
 const CDN_BASE = Deno.env.get("CDN_BASE_URL") ?? "";
-const SCOPES = ["for_you", "following", "campus"];
+const SCOPES = ["for_you", "following", "campus", "reels"];
 
 Deno.serve(async (req) => {
   const cors = handleCors(req);
@@ -14,12 +14,14 @@ Deno.serve(async (req) => {
   const t0 = performance.now();
   let userId: number | null = null;
   let cursor: string | null = null;
+  let scopeReq = "for_you";
 
   try {
     const supabase = serviceClient();
     userId = await requireAuth(req, supabase);
     const q = new URL(req.url).searchParams;
     const scope = q.get("scope") ?? "for_you";
+    scopeReq = scope;
     if (!SCOPES.includes(scope)) return json({ message: "Invalid scope." }, 422);
     cursor = q.get("cursor");
 
@@ -36,7 +38,7 @@ Deno.serve(async (req) => {
     if (err instanceof AuthError) return json({ message: err.message }, err.status);
     console.error("[feed-engine-failure]", err);
     // Rollout safety net: first page only (a continuing client would otherwise get duplicates). Remove once stable.
-    if (userId !== null && !cursor) {
+    if (userId !== null && !cursor && scopeReq !== "reels") { // the legacy feed has no notion of reels
       try {
         const legacy = await getFeedPage(serviceClient(), userId, null, CDN_BASE, "for_you");
         const fb = json({ ...legacy, fallback: true }); fb.headers.set("X-Feed-Fallback", "1"); return fb;

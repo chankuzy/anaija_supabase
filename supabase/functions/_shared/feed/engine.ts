@@ -13,7 +13,18 @@ import { batchAttachAudio } from "../services/audioAssetService.ts";
 import { batchAttachReposted, formatListing, formatPost, getBookmarkedIds, getLikedIds } from "../services/feedService.ts";
 import { resolveAvatarUrl } from "../avatar.ts";
 
-export type Scope = "for_you" | "following" | "campus";
+export type Scope = "for_you" | "following" | "campus" | "reels";
+const poolFor = (s: Scope) => (s === "reels" ? "feed_candidate_pool_reels" : "feed_candidate_pool");
+
+// Reels = standalone posts that are a video, or images carrying playable audio. SQL (feed_is_reel) is the source of
+// truth for candidates; this re-checks the hydrated post so a row that changed since ranking never leaks in.
+// Listings and stories are never reels.
+function isReelPost(p: any): boolean {
+  if (!p || p.type !== "post") return false;
+  const media: any[] = p.media ?? [];
+  if (p.video_url || media.some((m) => m.type === "video")) return true;
+  return !!p.audio?.enabled && !!p.audio?.url && media.some((m) => m.type === "image");
+}
 export type PeopleProvider = (ctx: { supabase: SupabaseClient; viewerId: number; sessionId: string }) =>
   Promise<{ id: number; reason: string }[]>;
 
@@ -41,16 +52,17 @@ const PEOPLE_LABELS: Record<string, string> = {
 };
 
 // ─── candidate building ──────────────────────────────────────────────────────────────────────────
-let guestPool: { at: number; rows: Candidate[] } | null = null; // user-independent, so safe to share
+const guestPools = new Map<string, { at: number; rows: Candidate[] }>(); // user-independent, so safe to share
 
-async function loadPool(supabase: SupabaseClient, viewerId: number | null, seed: string): Promise<Candidate[]> {
-  if (viewerId === null && guestPool && Date.now() - guestPool.at < 60_000) return guestPool.rows;
-  const { data, error } = await supabase.rpc("feed_candidate_pool", {
+async function loadPool(supabase: SupabaseClient, viewerId: number | null, seed: string, poolFn = "feed_candidate_pool"): Promise<Candidate[]> {
+  const gp = guestPools.get(poolFn);
+  if (viewerId === null && gp && Date.now() - gp.at < 60_000) return gp.rows;
+  const { data, error } = await supabase.rpc(poolFn, {
     p_viewer: viewerId, p_seed: viewerId === null ? "guest" : seed,
   });
   if (error) throw error;
   const rows = (data ?? []) as Candidate[];
-  if (viewerId === null) guestPool = { at: Date.now(), rows };
+  if (viewerId === null) guestPools.set(poolFn, { at: Date.now(), rows });
   return rows;
 }
 
@@ -61,11 +73,11 @@ async function loadProfile(supabase: SupabaseClient, viewerId: number): Promise<
 }
 
 async function buildRanked(
-  supabase: SupabaseClient, viewerId: number | null, cfg: FeedConfig, seed: string, exclude: Set<number>, resurface = false,
+  supabase: SupabaseClient, viewerId: number | null, cfg: FeedConfig, seed: string, exclude: Set<number>, resurface = false, poolFn = "feed_candidate_pool",
 ): Promise<{ items: SessionItem[]; poolSize: number }> {
   const mode = viewerId === null ? "guest" : "auth";
   const [pool, profile] = await Promise.all([
-    loadPool(supabase, viewerId, seed),
+    loadPool(supabase, viewerId, seed, poolFn),
     viewerId === null ? Promise.resolve(EMPTY_PROFILE) : loadProfile(supabase, viewerId),
   ]);
   const usable = pool.filter((c) => !exclude.has(c.post_id));
@@ -80,7 +92,7 @@ async function buildRanked(
     const relaxed = { ...base, candidates: { ...(base.candidates ?? {}), seen_days: 0, consumed_days: 0,
       followed_days: wide, institution_days: wide, interest_days: wide, creator_days: wide,
       wide_days: wide, listing_days: wide, explore_days: wide } };
-    const { data, error } = await supabase.rpc("feed_candidate_pool", { p_viewer: viewerId, p_seed: seed, p_cfg: relaxed });
+    const { data, error } = await supabase.rpc(poolFn, { p_viewer: viewerId, p_seed: seed, p_cfg: relaxed });
     if (error) console.error("[feed] resurface pool failed:", error.message);
     else {
       const have = new Set(usable.map((c) => c.post_id));
@@ -122,9 +134,9 @@ async function buildChrono(
 }
 
 /** Posts the previous live sessions already delivered: a reset/new session must not replay them. */
-async function recentDelivered(supabase: SupabaseClient, userId: number): Promise<Set<number>> {
+async function recentDelivered(supabase: SupabaseClient, userId: number, scope: Scope = "for_you"): Promise<Set<number>> {
   const { data } = await supabase.from("feed_sessions").select("items, pos")
-    .eq("user_id", userId).eq("scope", "for_you").gt("expires_at", new Date().toISOString())
+    .eq("user_id", userId).eq("scope", scope).gt("expires_at", new Date().toISOString())
     .order("created_at", { ascending: false }).limit(2);
   const out = new Set<number>();
   for (const s of (data ?? []) as { items: SessionItem[]; pos: number }[]) {
@@ -207,7 +219,7 @@ async function hydratePeople(
 export async function getFeed(req: FeedRequest): Promise<FeedResult> {
   const { supabase, viewerId, scope } = req;
   const mode = viewerId === null ? "guest" : "auth";
-  if (mode === "guest" && scope !== "for_you") throw new Error("guest feeds only support for_you");
+  if (mode === "guest" && scope !== "for_you" && scope !== "reels") throw new Error("guest feeds only support for_you and reels");
   const cfg = await loadConfig(supabase);
 
   // 1. resolve session ----------------------------------------------------------------------
@@ -227,9 +239,9 @@ export async function getFeed(req: FeedRequest): Promise<FeedResult> {
 
   if (!session) {
     const seed = crypto.randomUUID();
-    const exclude = viewerId !== null && scope === "for_you" ? await recentDelivered(supabase, viewerId) : new Set<number>();
-    const built = scope === "for_you"
-      ? await buildRanked(supabase, viewerId, cfg, seed, exclude, true)
+    const exclude = viewerId !== null && (scope === "for_you" || scope === "reels") ? await recentDelivered(supabase, viewerId, scope) : new Set<number>();
+    const built = scope === "for_you" || scope === "reels"
+      ? await buildRanked(supabase, viewerId, cfg, seed, exclude, true, poolFor(scope))
       : await buildChrono(supabase, viewerId as number, scope);
     const id = await createSession(supabase, {
       userId: viewerId, mode, scope, items: built.items, configVersion: cfg.version,
@@ -282,10 +294,10 @@ export async function getFeed(req: FeedRequest): Promise<FeedResult> {
 
   const nextPos = p + slice.length;
 
-  if (!replay && scope === "for_you" && items.length - nextPos < cfg.compose.rebuild_when_remaining &&
+  if (!replay && (scope === "for_you" || scope === "reels") && items.length - nextPos < cfg.compose.rebuild_when_remaining &&
       rebuilds < cfg.compose.max_rebuilds) {
     const exclude = new Set(items.filter((i): i is Extract<SessionItem, { t: "post" }> => i.t === "post").map((i) => i.id));
-    const built = await buildRanked(supabase, viewerId, cfg, `${session.id}:${rebuilds + 1}`, exclude);
+    const built = await buildRanked(supabase, viewerId, cfg, `${session.id}:${rebuilds + 1}`, exclude, false, poolFor(scope));
     if (rebuildAddsContent(items, built.items)) {
       const merged = mergeRebuild(items, built.items);
       if (merged.length > items.length) items = merged;
@@ -316,7 +328,7 @@ export async function getFeed(req: FeedRequest): Promise<FeedResult> {
     const it = slice[i];
     if (it.t === "post") {
       const post = hydrated.get(it.id);
-      if (!post) continue; // vanished/restricted since it was ranked: silently dropped
+      if (!post || (scope === "reels" && !isReelPost(post))) continue; // vanished/restricted/no longer a reel: silently dropped
       typed.push({ type: "post", id: `post_${it.id}`, post, meta: { src: it.src[0] ?? null, slot: p + i } });
       trace.push({ post_id: it.id, slot: p + i, src: it.src, score: it.score, stage: it.stage, why: it.why });
     } else if (viewerId !== null) {
