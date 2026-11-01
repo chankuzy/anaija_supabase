@@ -1,0 +1,46 @@
+/// <reference path="../_shared/deno-shim.d.ts" />
+import { Hono } from "hono";
+import { AuthError } from "../_shared/auth.ts";
+import { json, handleCors } from "../_shared/response.ts";
+import { HttpError } from "../_shared/services/communityAccess.ts";
+import { ValidationError } from "../_shared/services/postService.ts";
+import { registerCore } from "./core.ts";
+import { registerAccounts } from "./accounts.ts";
+import { registerAccountAvatar } from "./accounts-avatar.ts";
+import { registerStaff } from "./staff.ts";
+import { registerCommunities } from "./communities.ts";
+import { registerContent } from "./content.ts";
+
+// One function for every platform-staff operation (Platform Communications admin). Every route is staff-gated server-side.
+//   core: me accounts audit
+//   accounts: account detail/edit, status (activate/suspend/recover), per-account admins, avatar
+//   staff: list, grant, change role, revoke
+//   communities: platform-owned communities (list, detail, config, listing)
+//   content: Content Studio (drafts, schedule, publish, archive, stats) + the secret-gated scheduler entry point
+// Later drops register: campaigns, analytics.
+const app = new Hono().basePath("/platform");
+
+app.use("*", async (c, next) => {
+  const cors = handleCors(c.req.raw);
+  if (cors) return cors;
+  await next();
+});
+
+app.onError((err) => {
+  if (err instanceof AuthError) return json({ message: err.message }, err.status);
+  if (err instanceof HttpError) return json({ message: err.message, ...(err.errors ? { errors: err.errors } : {}) }, err.status);
+  if (err instanceof ValidationError) return json({ message: "Validation failed.", errors: err.errors }, 422);
+  console.error(err);
+  return json({ message: "Something went wrong." }, 500);
+});
+
+app.notFound(() => json({ message: "Not found." }, 404));
+
+registerCore(app);
+registerAccounts(app);
+registerAccountAvatar(app);
+registerStaff(app);
+registerCommunities(app);
+registerContent(app);
+
+Deno.serve(app.fetch);

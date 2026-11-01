@@ -844,3 +844,9 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/moments/deno.json"
 entrypoint = "./functions/moments/index.ts"
+
+[functions.platform]
+enabled = true
+verify_jwt = false
+import_map = "./functions/platform/deno.json"
+entrypoint = "./functions/platform/index.ts"

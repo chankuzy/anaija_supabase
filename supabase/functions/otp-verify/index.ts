@@ -3,6 +3,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
 import { issueToken } from "../_shared/auth.ts";
+import { isPerson } from "../_shared/services/accountGuard.ts";
 
 const PHONE_REGEX = /^(\+?234|0)[789][01]\d{8}$/;
 const CODE_REGEX = /^\d{6}$/;
@@ -48,6 +49,9 @@ Deno.serve(async (req) => {
     let { data: user, error: userError } = await supabase
       .from("users").select("*").eq("phone", phone).maybeSingle();
     if (userError) throw userError;
+
+    // Official accounts are never signed into: no token is ever issued for them.
+    if (user && !isPerson(user)) return json({ message: "Invalid or expired OTP." }, 422);
 
     let isNewUser = false;
 

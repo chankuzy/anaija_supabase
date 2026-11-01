@@ -3,6 +3,7 @@ import type { Context, Hono } from "hono";
 import { serviceClient, requireAuth, verifyTokenOptional } from "../_shared/auth.ts";
 import { json } from "../_shared/response.ts";
 import { resolveAvatarUrl, r2ObjectExists } from "../_shared/avatar.ts";
+import { isReservedUsername } from "../_shared/services/accountGuard.ts";
 
 const USERNAME_REGEX = /^[a-zA-Z0-9_]+$/;
 // "tagline" is the short quote under the cover photo. Plain text, same shape as bio.
@@ -24,6 +25,7 @@ function shapeProfile(user: any, institution: any, unread: number) {
     links: user.links ?? [],
     is_verified: user.is_verified,
     campus_verified: user.campus_verified,
+    account_type: user.account_type ?? "person",
     profile_completed: user.profile_completed,
     provider: user.provider,
     institution: institution
@@ -42,6 +44,15 @@ function unreadQuery(supabase: any, userId: number) {
     .select("*", { count: "exact", head: true })
     .eq("user_id", userId)
     .is("read_at", null);
+}
+
+// Reserved handles are blocked for new claims only: someone who already holds a name may keep re-saving it.
+async function usernameBlocked(supabase: any, userId: number | null, username: string): Promise<boolean> {
+  if (userId) {
+    const { data } = await supabase.from("users").select("username").eq("id", userId).maybeSingle();
+    if (data?.username === username) return false;
+  }
+  return isReservedUsername(supabase, username);
 }
 
 // Presigned-upload-then-confirm flow: the client gets a key from storage-sign-upload,
@@ -99,6 +110,7 @@ export function registerProfile(app: Hono<any, any, any>) {
       if (typeof u !== "string" || u.length < 3 || u.length > 30 || !USERNAME_REGEX.test(u)) {
         return json({ message: "Invalid username." }, 422);
       }
+      if (await usernameBlocked(supabase, userId, u)) return json({ message: "Username is taken." }, 409);
       const { data: taken, error: takenErr } = await supabase
         .from("users").select("id").eq("username", u).neq("id", userId).maybeSingle();
       if (takenErr) throw takenErr;
@@ -153,6 +165,7 @@ export function registerProfile(app: Hono<any, any, any>) {
       return json({ message: "Invalid username." }, 422);
     }
 
+    if (await usernameBlocked(supabase, userId, body.username)) return json({ message: "Username is taken." }, 409);
     const { data: taken } = await supabase.from("users").select("id").eq("username", body.username).neq("id", userId).maybeSingle();
     if (taken) return json({ message: "Username is taken." }, 409);
 
@@ -198,6 +211,8 @@ export function registerProfile(app: Hono<any, any, any>) {
 
     const supabase = serviceClient();
     const userId = await verifyTokenOptional(c.req.raw, supabase); // null if no/invalid token
+
+    if (await usernameBlocked(supabase, userId, username)) return json({ message: "Username is taken." }, 409);
 
     let query = supabase.from("users").select("id", { count: "exact", head: true }).eq("username", username);
     if (userId) query = query.neq("id", userId);

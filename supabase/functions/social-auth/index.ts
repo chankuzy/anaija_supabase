@@ -2,6 +2,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
 import { issueToken } from "../_shared/auth.ts";
+import { isPerson } from "../_shared/services/accountGuard.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -32,11 +33,15 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (error) throw error;
 
+    // Official accounts are never signed into, and a Google login can never be linked onto one.
+    if (user && !isPerson(user)) return json({ message: "This account can't sign in." }, 403);
+
     if (!user && googleUser.email) {
       const { data: byEmail, error: emailErr } = await supabase
         .from("users").select("*").eq("email", googleUser.email).maybeSingle();
       if (emailErr) throw emailErr;
       if (byEmail) {
+        if (!isPerson(byEmail)) return json({ message: "This account can't sign in." }, 403);
         const { data: linked, error: linkErr } = await supabase
           .from("users")
           .update({ provider_id: googleUser.provider_id, is_verified: true })

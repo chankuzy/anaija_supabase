@@ -1,5 +1,6 @@
 // Single source of truth for "what may this viewer do in this community". Used by every community endpoint.
 import type { SupabaseClient } from "../auth.ts";
+import { communityRoleFor, loadStaffRole, type StaffRole } from "./platformStaff.ts";
 
 export class HttpError extends Error {
   status: number;
@@ -28,6 +29,8 @@ export interface Access {
   role: Role | null; // null = not a member
   banned: boolean;
   designations: Designation[];
+  /** Set when the viewer is active platform staff on a platform-owned community (their role may be derived, not a membership). */
+  platformStaff?: StaffRole | null;
 }
 
 /** Community by id or slug (hidden when inactive or suspended) plus the viewer's standing in it. */
@@ -50,11 +53,29 @@ export async function loadAccess(
     supabase.from("community_designations").select("id, kind, scope_label, can_announce")
       .eq("community_id", c.id).eq("user_id", viewerId).is("revoked_at", null),
   ]);
+
+  let role = (m.data?.role as Role | undefined) ?? null;
+
+  // Platform-owned communities only: active platform staff act with a role derived from their staff role, so every
+  // existing moderation, pin, report and library route works for them without membership rows. A lookup failure
+  // grants nothing (fails closed). Ordinary communities never reach this branch and cost no extra query.
+  let platformStaff: StaffRole | null = null;
+  if (c.is_platform_owned === true) {
+    try {
+      platformStaff = await loadStaffRole(supabase, viewerId);
+      const granted = communityRoleFor(platformStaff);
+      if (granted && rank(granted) > rank(role)) role = granted;
+    } catch (e) {
+      console.error("platform staff lookup failed; no staff powers granted", e);
+    }
+  }
+
   return {
     community: c,
-    role: (m.data?.role as Role | undefined) ?? null,
+    role,
     banned: !!b.data,
     designations: (d.data ?? []) as Designation[],
+    platformStaff,
   };
 }
 
