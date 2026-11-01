@@ -32,3 +32,4 @@ Thumbs.db
 # IDE
 .idea/
 .vscode/
+*.before-*.bak
