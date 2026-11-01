@@ -156,6 +156,9 @@ CREATE TABLE public.posts (
   allow_story_sharing boolean,
   public_since timestamp with time zone,
   institution_id bigint,
+  content jsonb,
+  community_feed boolean NOT NULL DEFAULT true,
+  community_pinned_at timestamp with time zone,
   CONSTRAINT posts_pkey PRIMARY KEY (id),
   CONSTRAINT posts_user_id_foreign FOREIGN KEY (user_id) REFERENCES public.users(id),
   CONSTRAINT posts_audio_asset_id_fkey FOREIGN KEY (audio_asset_id) REFERENCES public.audio_assets(id),
@@ -301,8 +304,10 @@ CREATE TABLE public.conversations (
   is_active boolean NOT NULL DEFAULT true,
   created_at timestamp without time zone DEFAULT now(),
   updated_at timestamp without time zone DEFAULT now(),
+  community_id bigint,
   CONSTRAINT conversations_pkey PRIMARY KEY (id),
-  CONSTRAINT conversations_last_message_by_foreign FOREIGN KEY (last_message_by) REFERENCES public.users(id)
+  CONSTRAINT conversations_last_message_by_foreign FOREIGN KEY (last_message_by) REFERENCES public.users(id),
+  CONSTRAINT conversations_community_id_fkey FOREIGN KEY (community_id) REFERENCES public.communities(id)
 );
 CREATE TABLE public.listing_inquiries (
   id bigint NOT NULL DEFAULT nextval('listing_inquiries_id_seq'::regclass),
@@ -531,15 +536,39 @@ CREATE TABLE public.communities (
   posts_count integer NOT NULL DEFAULT 0,
   is_active boolean NOT NULL DEFAULT true,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
+  cover_key text,
+  category text NOT NULL DEFAULT 'other'::text CHECK (category = ANY (ARRAY['class'::text, 'department'::text, 'faculty'::text, 'campus'::text, 'creator'::text, 'interest'::text, 'professional'::text, 'seller'::text, 'other'::text])),
+  faculty text,
+  department text,
+  level text,
+  course_code text,
+  academic_session text,
+  discoverability text NOT NULL DEFAULT 'listed'::text CHECK (discoverability = ANY (ARRAY['listed'::text, 'unlisted'::text])),
+  join_policy text NOT NULL DEFAULT 'open'::text CHECK (join_policy = ANY (ARRAY['open'::text, 'request'::text, 'invite'::text])),
+  read_policy text NOT NULL DEFAULT 'public_preview'::text CHECK (read_policy = ANY (ARRAY['public_preview'::text, 'members_only'::text])),
+  permissions jsonb NOT NULL DEFAULT '{"chat": "member", "post": "member", "invite": "moderator", "library": "moderator", "session": "moderator", "announce": "moderator"}'::jsonb,
+  rules jsonb NOT NULL DEFAULT '[]'::jsonb,
+  links jsonb NOT NULL DEFAULT '[]'::jsonb,
+  status text NOT NULL DEFAULT 'active'::text CHECK (status = ANY (ARRAY['active'::text, 'archived'::text, 'suspended'::text])),
+  archived_at timestamp with time zone,
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  realtime_key uuid NOT NULL DEFAULT gen_random_uuid(),
+  chat_conversation_id bigint,
+  moment_settings jsonb NOT NULL DEFAULT '{"verdict": "member", "dept_war": "member", "hot_seat": "member", "one_question": "member", "confession_drop": "member", "dept_war_official": "representative"}'::jsonb,
   CONSTRAINT communities_pkey PRIMARY KEY (id),
   CONSTRAINT communities_institution_id_fkey FOREIGN KEY (institution_id) REFERENCES public.institutions(id),
-  CONSTRAINT communities_creator_id_fkey FOREIGN KEY (creator_id) REFERENCES public.users(id)
+  CONSTRAINT communities_creator_id_fkey FOREIGN KEY (creator_id) REFERENCES public.users(id),
+  CONSTRAINT communities_chat_conversation_id_fkey FOREIGN KEY (chat_conversation_id) REFERENCES public.conversations(id)
 );
 CREATE TABLE public.community_members (
   community_id bigint NOT NULL,
   user_id bigint NOT NULL,
-  role text NOT NULL DEFAULT 'member'::text,
+  role text NOT NULL DEFAULT 'member'::text CHECK (role = ANY (ARRAY['owner'::text, 'admin'::text, 'moderator'::text, 'member'::text])),
   joined_at timestamp with time zone NOT NULL DEFAULT now(),
+  joined_via text NOT NULL DEFAULT 'direct'::text CHECK (joined_via = ANY (ARRAY['direct'::text, 'request'::text, 'invite'::text, 'creator'::text])),
+  chat_notify text NOT NULL DEFAULT 'mentions'::text CHECK (chat_notify = ANY (ARRAY['all'::text, 'mentions'::text, 'none'::text])),
+  announce_notify boolean NOT NULL DEFAULT true,
+  muted_until timestamp with time zone,
   CONSTRAINT community_members_pkey PRIMARY KEY (community_id, user_id),
   CONSTRAINT community_members_community_id_fkey FOREIGN KEY (community_id) REFERENCES public.communities(id),
   CONSTRAINT community_members_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
@@ -896,4 +925,445 @@ CREATE TABLE public.message_deletions (
   CONSTRAINT message_deletions_pkey PRIMARY KEY (message_id, user_id),
   CONSTRAINT message_deletions_message_id_fkey FOREIGN KEY (message_id) REFERENCES public.messages(id),
   CONSTRAINT message_deletions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.poll_votes (
+  post_id bigint NOT NULL,
+  user_id bigint NOT NULL,
+  option_id smallint NOT NULL CHECK (option_id >= 0),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT poll_votes_pkey PRIMARY KEY (post_id, user_id, option_id),
+  CONSTRAINT poll_votes_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.posts(id),
+  CONSTRAINT poll_votes_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.publisher_grants (
+  id bigint NOT NULL DEFAULT nextval('publisher_grants_id_seq'::regclass),
+  user_id bigint NOT NULL,
+  display_name text NOT NULL,
+  publisher_type text NOT NULL DEFAULT 'organisation'::text CHECK (publisher_type = ANY (ARRAY['institution'::text, 'department'::text, 'organisation'::text, 'staff'::text])),
+  institution_id bigint,
+  can_announce boolean NOT NULL DEFAULT true,
+  revoked_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT publisher_grants_pkey PRIMARY KEY (id),
+  CONSTRAINT publisher_grants_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT publisher_grants_institution_id_fkey FOREIGN KEY (institution_id) REFERENCES public.institutions(id)
+);
+CREATE TABLE public.community_designations (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  community_id bigint NOT NULL,
+  user_id bigint NOT NULL,
+  kind text NOT NULL CHECK (kind = ANY (ARRAY['class_rep'::text, 'course_rep'::text, 'dept_exec'::text, 'contributor'::text])),
+  scope_label text,
+  can_announce boolean NOT NULL DEFAULT false,
+  granted_by bigint,
+  granted_at timestamp with time zone NOT NULL DEFAULT now(),
+  revoked_at timestamp with time zone,
+  revoked_by bigint,
+  CONSTRAINT community_designations_pkey PRIMARY KEY (id),
+  CONSTRAINT community_designations_community_id_fkey FOREIGN KEY (community_id) REFERENCES public.communities(id),
+  CONSTRAINT community_designations_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT community_designations_granted_by_fkey FOREIGN KEY (granted_by) REFERENCES public.users(id),
+  CONSTRAINT community_designations_revoked_by_fkey FOREIGN KEY (revoked_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.community_join_requests (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  community_id bigint NOT NULL,
+  user_id bigint NOT NULL,
+  message text CHECK (message IS NULL OR char_length(message) <= 300),
+  status text NOT NULL DEFAULT 'pending'::text CHECK (status = ANY (ARRAY['pending'::text, 'approved'::text, 'rejected'::text, 'cancelled'::text])),
+  decided_by bigint,
+  decided_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT community_join_requests_pkey PRIMARY KEY (id),
+  CONSTRAINT community_join_requests_community_id_fkey FOREIGN KEY (community_id) REFERENCES public.communities(id),
+  CONSTRAINT community_join_requests_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT community_join_requests_decided_by_fkey FOREIGN KEY (decided_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.community_invites (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  community_id bigint NOT NULL,
+  token text NOT NULL UNIQUE,
+  label text,
+  created_by bigint NOT NULL,
+  max_uses integer CHECK (max_uses IS NULL OR max_uses > 0),
+  uses integer NOT NULL DEFAULT 0,
+  expires_at timestamp with time zone,
+  revoked_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT community_invites_pkey PRIMARY KEY (id),
+  CONSTRAINT community_invites_community_id_fkey FOREIGN KEY (community_id) REFERENCES public.communities(id),
+  CONSTRAINT community_invites_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.community_bans (
+  community_id bigint NOT NULL,
+  user_id bigint NOT NULL,
+  banned_by bigint,
+  reason text,
+  expires_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT community_bans_pkey PRIMARY KEY (community_id, user_id),
+  CONSTRAINT community_bans_community_id_fkey FOREIGN KEY (community_id) REFERENCES public.communities(id),
+  CONSTRAINT community_bans_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT community_bans_banned_by_fkey FOREIGN KEY (banned_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.community_mod_log (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  community_id bigint NOT NULL,
+  actor_id bigint,
+  action text NOT NULL,
+  target_user_id bigint,
+  target_kind text,
+  target_id bigint,
+  note text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT community_mod_log_pkey PRIMARY KEY (id),
+  CONSTRAINT community_mod_log_community_id_fkey FOREIGN KEY (community_id) REFERENCES public.communities(id),
+  CONSTRAINT community_mod_log_actor_id_fkey FOREIGN KEY (actor_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.community_collections (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  community_id bigint NOT NULL,
+  name text NOT NULL CHECK (char_length(name) >= 1 AND char_length(name) <= 60),
+  description text,
+  sort_order integer NOT NULL DEFAULT 0,
+  created_by bigint,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT community_collections_pkey PRIMARY KEY (id),
+  CONSTRAINT community_collections_community_id_fkey FOREIGN KEY (community_id) REFERENCES public.communities(id),
+  CONSTRAINT community_collections_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.library_resources (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  community_id bigint NOT NULL,
+  post_id bigint NOT NULL UNIQUE,
+  uploader_id bigint NOT NULL,
+  title text NOT NULL CHECK (char_length(title) >= 1 AND char_length(title) <= 120),
+  description text CHECK (description IS NULL OR char_length(description) <= 500),
+  doc_type text NOT NULL DEFAULT 'other'::text CHECK (doc_type = ANY (ARRAY['past_question'::text, 'lecture_note'::text, 'slides'::text, 'textbook'::text, 'assignment'::text, 'syllabus'::text, 'project'::text, 'other'::text])),
+  course_code text,
+  academic_session text,
+  subject text,
+  collection_id bigint,
+  is_active boolean NOT NULL DEFAULT true,
+  removed_by bigint,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  search_vector tsvector DEFAULT to_tsvector('simple'::regconfig, ((((((((COALESCE(title, ''::text) || ' '::text) || COALESCE(course_code, ''::text)) || ' '::text) || COALESCE(subject, ''::text)) || ' '::text) || COALESCE(description, ''::text)) || ' '::text) || COALESCE(academic_session, ''::text))),
+  CONSTRAINT library_resources_pkey PRIMARY KEY (id),
+  CONSTRAINT library_resources_community_id_fkey FOREIGN KEY (community_id) REFERENCES public.communities(id),
+  CONSTRAINT library_resources_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.posts(id),
+  CONSTRAINT library_resources_uploader_id_fkey FOREIGN KEY (uploader_id) REFERENCES public.users(id),
+  CONSTRAINT library_resources_collection_id_fkey FOREIGN KEY (collection_id) REFERENCES public.community_collections(id),
+  CONSTRAINT library_resources_removed_by_fkey FOREIGN KEY (removed_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.content_reports (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  reporter_id bigint NOT NULL,
+  community_id bigint,
+  target_kind text NOT NULL CHECK (target_kind = ANY (ARRAY['post'::text, 'comment'::text, 'message'::text, 'session_post'::text, 'resource'::text, 'community'::text, 'user'::text])),
+  target_id bigint NOT NULL,
+  reason text NOT NULL CHECK (reason = ANY (ARRAY['spam'::text, 'harassment'::text, 'hate'::text, 'sexual'::text, 'violence'::text, 'misinformation'::text, 'privacy'::text, 'other'::text])),
+  details text CHECK (details IS NULL OR char_length(details) <= 500),
+  status text NOT NULL DEFAULT 'open'::text CHECK (status = ANY (ARRAY['open'::text, 'actioned'::text, 'dismissed'::text])),
+  handled_by bigint,
+  handled_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT content_reports_pkey PRIMARY KEY (id),
+  CONSTRAINT content_reports_reporter_id_fkey FOREIGN KEY (reporter_id) REFERENCES public.users(id),
+  CONSTRAINT content_reports_community_id_fkey FOREIGN KEY (community_id) REFERENCES public.communities(id),
+  CONSTRAINT content_reports_handled_by_fkey FOREIGN KEY (handled_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.community_sessions (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  community_id bigint NOT NULL,
+  host_id bigint NOT NULL,
+  code text NOT NULL UNIQUE,
+  type text NOT NULL DEFAULT 'anonymous_feed'::text CHECK (type = 'anonymous_feed'::text),
+  title text NOT NULL CHECK (char_length(title) >= 1 AND char_length(title) <= 120),
+  description text CHECK (description IS NULL OR char_length(description) <= 500),
+  status text NOT NULL DEFAULT 'live'::text CHECK (status = ANY (ARRAY['scheduled'::text, 'live'::text, 'ended'::text])),
+  starts_at timestamp with time zone,
+  ends_at timestamp with time zone,
+  ended_at timestamp with time zone,
+  ended_by bigint,
+  allow_preview boolean NOT NULL DEFAULT true,
+  replies_enabled boolean NOT NULL DEFAULT true,
+  reactions_enabled boolean NOT NULL DEFAULT true,
+  notify_members boolean NOT NULL DEFAULT false,
+  realtime_key uuid NOT NULL DEFAULT gen_random_uuid(),
+  posts_count integer NOT NULL DEFAULT 0,
+  participants_count integer NOT NULL DEFAULT 0,
+  is_archived boolean NOT NULL DEFAULT false,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT community_sessions_pkey PRIMARY KEY (id),
+  CONSTRAINT community_sessions_ended_by_fkey FOREIGN KEY (ended_by) REFERENCES public.users(id),
+  CONSTRAINT community_sessions_community_id_fkey FOREIGN KEY (community_id) REFERENCES public.communities(id),
+  CONSTRAINT community_sessions_host_id_fkey FOREIGN KEY (host_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.session_posts (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  session_id bigint NOT NULL,
+  parent_id bigint,
+  author_id bigint NOT NULL,
+  alias_no integer NOT NULL,
+  body text NOT NULL CHECK (char_length(body) >= 1 AND char_length(body) <= 1000),
+  reactions_count integer NOT NULL DEFAULT 0,
+  replies_count integer NOT NULL DEFAULT 0,
+  removed_at timestamp with time zone,
+  removed_by bigint,
+  removed_reason text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT session_posts_pkey PRIMARY KEY (id),
+  CONSTRAINT session_posts_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.community_sessions(id),
+  CONSTRAINT session_posts_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES public.session_posts(id),
+  CONSTRAINT session_posts_author_id_fkey FOREIGN KEY (author_id) REFERENCES public.users(id),
+  CONSTRAINT session_posts_removed_by_fkey FOREIGN KEY (removed_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.session_aliases (
+  session_id bigint NOT NULL,
+  user_id bigint NOT NULL,
+  alias_no integer NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT session_aliases_pkey PRIMARY KEY (session_id, user_id),
+  CONSTRAINT session_aliases_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.community_sessions(id),
+  CONSTRAINT session_aliases_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.session_reactions (
+  post_id bigint NOT NULL,
+  user_id bigint NOT NULL,
+  kind text NOT NULL DEFAULT 'like'::text CHECK (kind = ANY (ARRAY['like'::text, 'fire'::text, 'laugh'::text, 'wow'::text, 'sad'::text])),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT session_reactions_pkey PRIMARY KEY (post_id, user_id),
+  CONSTRAINT session_reactions_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.session_posts(id),
+  CONSTRAINT session_reactions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.session_blocks (
+  session_id bigint NOT NULL,
+  user_id bigint NOT NULL,
+  blocked_by bigint,
+  reason text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT session_blocks_pkey PRIMARY KEY (session_id, user_id),
+  CONSTRAINT session_blocks_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.community_sessions(id),
+  CONSTRAINT session_blocks_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT session_blocks_blocked_by_fkey FOREIGN KEY (blocked_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.moments (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  code text NOT NULL UNIQUE,
+  community_id bigint NOT NULL,
+  creator_id bigint NOT NULL,
+  type text NOT NULL CHECK (type = ANY (ARRAY['hot_seat'::text, 'verdict'::text, 'confession_drop'::text, 'dept_war'::text, 'one_question'::text])),
+  status text NOT NULL DEFAULT 'active'::text CHECK (status = ANY (ARRAY['draft'::text, 'scheduled'::text, 'active'::text, 'closed'::text, 'completed'::text, 'cancelled'::text])),
+  title text NOT NULL CHECK (char_length(title) >= 1 AND char_length(title) <= 200),
+  body text CHECK (body IS NULL OR char_length(body) <= 600),
+  anonymous boolean NOT NULL DEFAULT false,
+  allow_anonymous_entries boolean NOT NULL DEFAULT true,
+  allow_preview boolean NOT NULL DEFAULT true,
+  is_official boolean NOT NULL DEFAULT false,
+  starts_at timestamp with time zone,
+  ends_at timestamp with time zone,
+  ended_at timestamp with time zone,
+  ended_by bigint,
+  cancel_reason text,
+  soon_notified_at timestamp with time zone,
+  realtime_key uuid NOT NULL DEFAULT gen_random_uuid(),
+  participants_count integer NOT NULL DEFAULT 0,
+  entries_count integer NOT NULL DEFAULT 0,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT moments_pkey PRIMARY KEY (id),
+  CONSTRAINT moments_community_id_fkey FOREIGN KEY (community_id) REFERENCES public.communities(id),
+  CONSTRAINT moments_creator_id_fkey FOREIGN KEY (creator_id) REFERENCES public.users(id),
+  CONSTRAINT moments_ended_by_fkey FOREIGN KEY (ended_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.moment_hot_seats (
+  moment_id bigint NOT NULL,
+  type text NOT NULL DEFAULT 'hot_seat'::text CHECK (type = 'hot_seat'::text),
+  submissions_closed_at timestamp with time zone,
+  answer_until timestamp with time zone NOT NULL,
+  CONSTRAINT moment_hot_seats_pkey PRIMARY KEY (moment_id),
+  CONSTRAINT moment_hot_seats_moment_id_type_fkey FOREIGN KEY (moment_id) REFERENCES public.moments(id),
+  CONSTRAINT moment_hot_seats_moment_id_type_fkey FOREIGN KEY (type) REFERENCES public.moments(type)
+);
+CREATE TABLE public.moment_confession_drops (
+  moment_id bigint NOT NULL,
+  type text NOT NULL DEFAULT 'confession_drop'::text CHECK (type = 'confession_drop'::text),
+  reveal_at timestamp with time zone NOT NULL,
+  reveal_mode text NOT NULL DEFAULT 'sequential'::text CHECK (reveal_mode = ANY (ARRAY['all'::text, 'sequential'::text, 'manual'::text])),
+  reveal_interval_secs integer NOT NULL DEFAULT 20 CHECK (reveal_interval_secs >= 5 AND reveal_interval_secs <= 3600),
+  max_per_user integer NOT NULL DEFAULT 3 CHECK (max_per_user >= 1 AND max_per_user <= 10),
+  reveal_notified_at timestamp with time zone,
+  CONSTRAINT moment_confession_drops_pkey PRIMARY KEY (moment_id),
+  CONSTRAINT moment_confession_drops_moment_id_type_fkey FOREIGN KEY (moment_id) REFERENCES public.moments(id),
+  CONSTRAINT moment_confession_drops_moment_id_type_fkey FOREIGN KEY (type) REFERENCES public.moments(type)
+);
+CREATE TABLE public.moment_options (
+  moment_id bigint NOT NULL,
+  type text NOT NULL DEFAULT 'verdict'::text CHECK (type = 'verdict'::text),
+  idx smallint NOT NULL CHECK (idx >= 0 AND idx <= 9),
+  label text NOT NULL CHECK (char_length(label) >= 1 AND char_length(label) <= 80),
+  votes_count integer NOT NULL DEFAULT 0,
+  CONSTRAINT moment_options_pkey PRIMARY KEY (moment_id, idx),
+  CONSTRAINT moment_options_moment_id_type_fkey FOREIGN KEY (moment_id) REFERENCES public.moments(id),
+  CONSTRAINT moment_options_moment_id_type_fkey FOREIGN KEY (type) REFERENCES public.moments(type)
+);
+CREATE TABLE public.moment_votes (
+  moment_id bigint NOT NULL,
+  user_id bigint NOT NULL,
+  option_idx smallint NOT NULL,
+  side_community_id bigint,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT moment_votes_pkey PRIMARY KEY (moment_id, user_id),
+  CONSTRAINT moment_votes_side_community_id_fkey FOREIGN KEY (side_community_id) REFERENCES public.communities(id),
+  CONSTRAINT moment_votes_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT moment_votes_moment_id_option_idx_fkey FOREIGN KEY (moment_id) REFERENCES public.moment_options(moment_id),
+  CONSTRAINT moment_votes_moment_id_option_idx_fkey FOREIGN KEY (option_idx) REFERENCES public.moment_options(idx)
+);
+CREATE TABLE public.moment_war_config (
+  moment_id bigint NOT NULL,
+  type text NOT NULL DEFAULT 'dept_war'::text CHECK (type = 'dept_war'::text),
+  challenge_type text NOT NULL CHECK (challenge_type = ANY (ARRAY['trivia'::text, 'riddle'::text, 'campus_knowledge'::text, 'creative'::text, 'voting'::text])),
+  points_per_item integer NOT NULL DEFAULT 10 CHECK (points_per_item >= 1 AND points_per_item <= 100),
+  min_participants integer NOT NULL DEFAULT 3 CHECK (min_participants >= 1 AND min_participants <= 50),
+  invite_expires_at timestamp with time zone,
+  message text CHECK (message IS NULL OR char_length(message) <= 300),
+  winner_community_id bigint,
+  results jsonb,
+  CONSTRAINT moment_war_config_pkey PRIMARY KEY (moment_id),
+  CONSTRAINT moment_war_config_winner_community_id_fkey FOREIGN KEY (winner_community_id) REFERENCES public.communities(id),
+  CONSTRAINT moment_war_config_moment_id_type_fkey FOREIGN KEY (moment_id) REFERENCES public.moments(id),
+  CONSTRAINT moment_war_config_moment_id_type_fkey FOREIGN KEY (type) REFERENCES public.moments(type)
+);
+CREATE TABLE public.moment_war_sides (
+  moment_id bigint NOT NULL,
+  community_id bigint NOT NULL,
+  side text NOT NULL CHECK (side = ANY (ARRAY['challenger'::text, 'challenged'::text])),
+  status text NOT NULL DEFAULT 'pending'::text CHECK (status = ANY (ARRAY['pending'::text, 'accepted'::text, 'declined'::text])),
+  proposed_by bigint,
+  decided_by bigint,
+  decided_at timestamp with time zone,
+  CONSTRAINT moment_war_sides_pkey PRIMARY KEY (moment_id, community_id),
+  CONSTRAINT moment_war_sides_moment_id_fkey FOREIGN KEY (moment_id) REFERENCES public.moments(id),
+  CONSTRAINT moment_war_sides_community_id_fkey FOREIGN KEY (community_id) REFERENCES public.communities(id),
+  CONSTRAINT moment_war_sides_proposed_by_fkey FOREIGN KEY (proposed_by) REFERENCES public.users(id),
+  CONSTRAINT moment_war_sides_decided_by_fkey FOREIGN KEY (decided_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.moment_war_items (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  moment_id bigint NOT NULL,
+  idx smallint NOT NULL CHECK (idx >= 0 AND idx <= 29),
+  kind text NOT NULL CHECK (kind = ANY (ARRAY['choice'::text, 'text'::text])),
+  prompt text NOT NULL CHECK (char_length(prompt) >= 1 AND char_length(prompt) <= 300),
+  choices ARRAY,
+  correct_idx smallint,
+  accepted ARRAY,
+  CONSTRAINT moment_war_items_pkey PRIMARY KEY (id),
+  CONSTRAINT moment_war_items_moment_id_fkey FOREIGN KEY (moment_id) REFERENCES public.moments(id)
+);
+CREATE TABLE public.moment_war_answers (
+  item_id bigint NOT NULL,
+  user_id bigint NOT NULL,
+  community_id bigint NOT NULL,
+  choice_idx smallint,
+  answer_text text CHECK (answer_text IS NULL OR char_length(answer_text) <= 120),
+  correct boolean NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT moment_war_answers_pkey PRIMARY KEY (item_id, user_id),
+  CONSTRAINT moment_war_answers_item_id_fkey FOREIGN KEY (item_id) REFERENCES public.moment_war_items(id),
+  CONSTRAINT moment_war_answers_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT moment_war_answers_community_id_fkey FOREIGN KEY (community_id) REFERENCES public.communities(id)
+);
+CREATE TABLE public.moment_participants (
+  moment_id bigint NOT NULL,
+  user_id bigint NOT NULL,
+  side_community_id bigint,
+  joined_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT moment_participants_pkey PRIMARY KEY (moment_id, user_id),
+  CONSTRAINT moment_participants_moment_id_fkey FOREIGN KEY (moment_id) REFERENCES public.moments(id),
+  CONSTRAINT moment_participants_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT moment_participants_side_community_id_fkey FOREIGN KEY (side_community_id) REFERENCES public.communities(id)
+);
+CREATE TABLE public.moment_aliases (
+  moment_id bigint NOT NULL,
+  user_id bigint NOT NULL,
+  alias_no integer NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT moment_aliases_pkey PRIMARY KEY (moment_id, user_id),
+  CONSTRAINT moment_aliases_moment_id_fkey FOREIGN KEY (moment_id) REFERENCES public.moments(id),
+  CONSTRAINT moment_aliases_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.moment_entries (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  moment_id bigint NOT NULL,
+  parent_id bigint,
+  kind text NOT NULL CHECK (kind = ANY (ARRAY['question'::text, 'comment'::text, 'confession'::text, 'response'::text, 'submission'::text])),
+  author_id bigint NOT NULL,
+  side_community_id bigint,
+  is_anonymous boolean NOT NULL DEFAULT true,
+  alias_no integer,
+  body text NOT NULL CHECK (char_length(body) >= 1 AND char_length(body) <= 1500),
+  answer text CHECK (answer IS NULL OR char_length(answer) <= 1500),
+  answered_at timestamp with time zone,
+  status text NOT NULL DEFAULT 'visible'::text CHECK (status = ANY (ARRAY['pending'::text, 'visible'::text, 'approved'::text, 'answered'::text, 'skipped'::text, 'dismissed'::text, 'rejected'::text, 'removed'::text])),
+  flags ARRAY NOT NULL DEFAULT '{}'::text[],
+  reveal_at timestamp with time zone,
+  upvotes_count integer NOT NULL DEFAULT 0,
+  reactions_count integer NOT NULL DEFAULT 0,
+  replies_count integer NOT NULL DEFAULT 0,
+  client_key text CHECK (client_key IS NULL OR char_length(client_key) <= 64),
+  moderated_by bigint,
+  moderated_at timestamp with time zone,
+  moderation_note text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT moment_entries_pkey PRIMARY KEY (id),
+  CONSTRAINT moment_entries_moment_id_fkey FOREIGN KEY (moment_id) REFERENCES public.moments(id),
+  CONSTRAINT moment_entries_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES public.moment_entries(id),
+  CONSTRAINT moment_entries_author_id_fkey FOREIGN KEY (author_id) REFERENCES public.users(id),
+  CONSTRAINT moment_entries_side_community_id_fkey FOREIGN KEY (side_community_id) REFERENCES public.communities(id),
+  CONSTRAINT moment_entries_moderated_by_fkey FOREIGN KEY (moderated_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.moment_reactions (
+  entry_id bigint NOT NULL,
+  user_id bigint NOT NULL,
+  kind text NOT NULL DEFAULT 'like'::text CHECK (kind = ANY (ARRAY['like'::text, 'fire'::text, 'laugh'::text, 'wow'::text, 'sad'::text, 'upvote'::text])),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT moment_reactions_pkey PRIMARY KEY (entry_id, user_id),
+  CONSTRAINT moment_reactions_entry_id_fkey FOREIGN KEY (entry_id) REFERENCES public.moment_entries(id),
+  CONSTRAINT moment_reactions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.moment_reminders (
+  moment_id bigint NOT NULL,
+  user_id bigint NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT moment_reminders_pkey PRIMARY KEY (moment_id, user_id),
+  CONSTRAINT moment_reminders_moment_id_fkey FOREIGN KEY (moment_id) REFERENCES public.moments(id),
+  CONSTRAINT moment_reminders_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.moment_blocks (
+  moment_id bigint NOT NULL,
+  user_id bigint NOT NULL,
+  blocked_by bigint,
+  reason text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT moment_blocks_pkey PRIMARY KEY (moment_id, user_id),
+  CONSTRAINT moment_blocks_moment_id_fkey FOREIGN KEY (moment_id) REFERENCES public.moments(id),
+  CONSTRAINT moment_blocks_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT moment_blocks_blocked_by_fkey FOREIGN KEY (blocked_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.moment_reports (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  moment_id bigint NOT NULL,
+  entry_id bigint,
+  reporter_id bigint NOT NULL,
+  reason text NOT NULL CHECK (reason = ANY (ARRAY['spam'::text, 'harassment'::text, 'hate'::text, 'sexual'::text, 'violence'::text, 'misinformation'::text, 'privacy'::text, 'other'::text])),
+  details text CHECK (details IS NULL OR char_length(details) <= 500),
+  status text NOT NULL DEFAULT 'open'::text CHECK (status = ANY (ARRAY['open'::text, 'actioned'::text, 'dismissed'::text])),
+  handled_by bigint,
+  handled_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT moment_reports_pkey PRIMARY KEY (id),
+  CONSTRAINT moment_reports_moment_id_fkey FOREIGN KEY (moment_id) REFERENCES public.moments(id),
+  CONSTRAINT moment_reports_entry_id_fkey FOREIGN KEY (entry_id) REFERENCES public.moment_entries(id),
+  CONSTRAINT moment_reports_reporter_id_fkey FOREIGN KEY (reporter_id) REFERENCES public.users(id),
+  CONSTRAINT moment_reports_handled_by_fkey FOREIGN KEY (handled_by) REFERENCES public.users(id)
 );

@@ -1,0 +1,47 @@
+/// <reference path="../_shared/deno-shim.d.ts" />
+import { Hono } from "hono";
+import { AuthError } from "../_shared/auth.ts";
+import { json, handleCors } from "../_shared/response.ts";
+import { HttpError } from "../_shared/services/communityAccess.ts";
+import { ValidationError } from "../_shared/services/postService.ts";
+import { registerCore } from "./core.ts";
+import { registerMembership } from "./membership.ts";
+import { registerContent } from "./content.ts";
+import { registerMembers } from "./members.ts";
+import { registerSessions } from "./sessions.ts";
+import { registerLibrary } from "./library.ts";
+import { registerPrefs } from "./prefs.ts";
+
+// One function for every community operation (the project is at its edge-function limit).
+//   core:       discover mine show feed create update
+//   membership: join leave requests decide invites invite-revoke invite-preview invite-redeem
+//   content:    post pin post-remove report reports report-handle
+//   members:    members member-role member-remove member-mute ban unban bans designation designation-revoke
+// Later drops register library, chat helpers and sessions here.
+const app = new Hono().basePath("/communities");
+
+app.use("*", async (c, next) => {
+  const cors = handleCors(c.req.raw);
+  if (cors) return cors;
+  await next();
+});
+
+app.onError((err) => {
+  if (err instanceof AuthError) return json({ message: err.message }, err.status);
+  if (err instanceof HttpError) return json({ message: err.message, ...(err.errors ? { errors: err.errors } : {}) }, err.status);
+  if (err instanceof ValidationError) return json({ message: "Validation failed.", errors: err.errors }, 422);
+  console.error(err);
+  return json({ message: "Something went wrong." }, 500);
+});
+
+app.notFound(() => json({ message: "Not found." }, 404));
+
+registerCore(app);
+registerMembership(app);
+registerContent(app);
+registerMembers(app);
+registerSessions(app);
+registerLibrary(app);
+registerPrefs(app);
+
+Deno.serve(app.fetch);

@@ -832,3 +832,15 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/hashtags/deno.json"
 entrypoint = "./functions/hashtags/index.ts"
+
+[functions.communities]
+enabled = true
+verify_jwt = false
+import_map = "./functions/communities/deno.json"
+entrypoint = "./functions/communities/index.ts"
+
+[functions.moments]
+enabled = true
+verify_jwt = false
+import_map = "./functions/moments/deno.json"
+entrypoint = "./functions/moments/index.ts"

@@ -23,7 +23,7 @@ export async function sharePost(c: Context): Promise<Response> {
   if (!postId) return json({ message: "Invalid post id." }, 422);
 
   const { data: post, error } = await supabase
-    .from("posts").select("id, user_id, type, is_active, shares_count").eq("id", postId).maybeSingle();
+    .from("posts").select("id, user_id, type, is_active, shares_count, community_id").eq("id", postId).maybeSingle();
   if (error) throw error;
   if (!post || !post.is_active) return json({ message: "Not found." }, 404);
 
@@ -33,6 +33,9 @@ export async function sharePost(c: Context): Promise<Response> {
   if (post.type === "story") return json({ shares_count: current, share_url: null });
 
   const shareUrl = post.type === "listing" ? `${APP_URL}/l/${postId}` : `${APP_URL}/p/${postId}`;
+
+  // Community posts: link only (the post gate already proved the viewer is a reader); never counted.
+  if (post.community_id) return json({ shares_count: current, share_url: shareUrl });
 
   // Sharing your own post is allowed but never counts.
   if (post.user_id === userId) return json({ shares_count: current, share_url: shareUrl });

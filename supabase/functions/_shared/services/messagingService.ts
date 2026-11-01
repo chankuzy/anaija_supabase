@@ -2,8 +2,18 @@ import type { SupabaseClient } from "../auth.ts";
 import { broadcastToConversation, broadcastToUser } from "./realtimeService.ts";
 import { resolveAvatarUrl } from "../avatar.ts";
 import { isBlockedEitherWay, getFollowStatus } from "./blockService.ts";
+import { assertCanSendCommunity, checkShareTarget, fanoutCommunityMessage } from "./communityChat.ts";
 
 const PAGE_SIZE = 30;
+
+// Sticker messages are type "sticker" with body "pack/id" and no media_key. This is the server-side allow-list;
+// it is generated from anaija-web/lib/stickers/manifest.json (scripts/gen-stickers.mjs).
+const STICKER_PACKS = new Map<string, Set<string>>([["naija-vibes", new Set(["wahala", "nowahala", "omo", "sharp", "abeg", "chai", "nawa", "gbam", "oya", "echoke"])], ["faces", new Set(["smile", "laugh", "love", "cry", "shock", "cool", "angry", "sleepy", "wink"])]]);
+function isValidSticker(body: unknown): boolean {
+  if (typeof body !== "string") return false;
+  const parts = body.split("/");
+  return parts.length === 2 && STICKER_PACKS.get(parts[0])?.has(parts[1]) === true;
+}
 
 // ─── Inbox ──────────────────────────────────────────────────────────────
 
@@ -33,7 +43,7 @@ export async function getInbox(supabase: SupabaseClient, userId: number) {
   const { data: allParticipants } = await supabase
     .from("conversation_participants")
     .select("conversation_id, user_id, request_status, user:users(id, name, username, avatar_key, avatar)")
-    .in("conversation_id", (conversations ?? []).map((c: any) => c.id));
+    .in("conversation_id", (conversations ?? []).filter((c: any) => !c.community_id).map((c: any) => c.id));
 
   const participantsByConv = new Map<number, any[]>();
   for (const p of allParticipants ?? []) {
@@ -52,9 +62,11 @@ export async function getInbox(supabase: SupabaseClient, userId: number) {
       id: c.id,
       type: c.type,
       title: c.title ?? other?.name ?? null,
-      avatar: otherAvatar,
+      community_id: c.community_id ?? null,
+      avatar: c.community_id ? resolveAvatarUrl(c.avatar_key) : otherAvatar,
       last_message_body: isCleared(mine?.cleared_at, c.last_message_at) ? null : c.last_message_body,
       last_message_at: c.last_message_at,
+      last_message_by: isCleared(mine?.cleared_at, c.last_message_at) ? null : (c.last_message_by ?? null),
       unread_count: isCleared(mine?.cleared_at, c.last_message_at) ? 0 : (mine?.unread_count ?? 0),
       is_muted: mine?.is_muted ?? false,
       request_status: mine?.request_status ?? "accepted",
@@ -201,7 +213,7 @@ export async function listMessages(supabase: SupabaseClient, conversationId: num
   const replyToIds = [...new Set(messages.filter((m: any) => m.reply_to_id).map((m: any) => m.reply_to_id))];
   const replyToMap = new Map<number, any>();
   if (replyToIds.length) {
-    const { data: replies } = await supabase.from("messages").select("id, body, sender_id, type, deleted_at").in("id", replyToIds);
+    const { data: replies } = await supabase.from("messages").select("id, body, sender_id, type, deleted_at, media_key, media_type").in("id", replyToIds);
     for (const r of replies ?? []) replyToMap.set(r.id, r);
   }
 
@@ -242,8 +254,13 @@ export async function sendMessage(
   userId: number,
   input: { body?: string; type?: string; shared_post_id?: number; reply_to_id?: number; media_key?: string; media_type?: string; client_temp_id?: string },
 ) {
-  const gate = await assertCanSend(supabase, conversationId, userId);
+  const { data: convRow } = await supabase.from("conversations").select("community_id").eq("id", conversationId).maybeSingle();
+  const communityId: number | null = convRow?.community_id ?? null;
+  const gate = communityId
+    ? await assertCanSendCommunity(supabase, communityId, userId)
+    : await assertCanSend(supabase, conversationId, userId);
   if ("unauthorized" in gate) return { unauthorized: true as const };
+  if ("forbidden" in gate) return { forbidden: gate.forbidden };
   if ("blocked" in gate) return { blocked: true as const };
   if ("requestLimitReached" in gate) return { requestLimitReached: true as const };
 
@@ -253,6 +270,11 @@ export async function sendMessage(
     (input.media_key && (!input.media_key.startsWith(`${userId}/`) || input.media_key.includes("..")))
   ) {
     return { invalidMedia: true as const };
+  }
+  if (input.type === "sticker" && !isValidSticker(input.body)) return { invalidMedia: true as const };
+  if (input.shared_post_id) {
+    const why = await checkShareTarget(supabase, userId, communityId, input.shared_post_id);
+    if (why) return { forbidden: why };
   }
 
   const selectClause = `*, sender:users!messages_sender_id_foreign(id, name, username, avatar_key, avatar), sharedPost:posts(*, user:users!posts_user_id_foreign(id, name, username, avatar_key, avatar), listingDetail:listing_details(*), media:post_media(*))`;
@@ -311,11 +333,15 @@ export async function sendMessage(
     .single();
 
   const lastMessageAt = new Date().toISOString();
-  const previewBody = message.type === "file" ? "Sent a file" : message.body ?? (message.type === "post_share"
-    ? (message.sharedPost?.type === "listing" ? "Shared a listing" : "Shared a post")
-    : message.type === "audio"
-    ? "🎵 Voice message"
-    : `[${message.type}]`);
+  const sharedType = message.sharedPost?.type;
+  const previewBody = message.type === "sticker" ? "Sticker"
+    : message.type === "file" ? "Sent a file"
+    : message.type === "audio" ? "🎵 Voice message"
+    : message.type === "post_share"
+      ? (sharedType === "listing" ? "Shared a listing"
+        : (sharedType === "reel" || sharedType === "video") ? "Shared a reel"
+        : "Shared a post")
+    : message.body ?? `[${message.type}]`;
 
   await supabase.from("conversations").update({
     last_message_body: previewBody,
@@ -335,6 +361,7 @@ export async function sendMessage(
       conversation_id: conversationId,
       last_message_body: previewBody,
       last_message_at: lastMessageAt,
+      last_message_by: userId,
       unread_count: newUnreadCount,
     });
 
@@ -342,6 +369,7 @@ export async function sendMessage(
 
   const formatted = formatMessage(await withReplyTo(supabase, message));
   await broadcastToConversation(supabase, conversationId, "new_message", formatted);
+  if (communityId) await fanoutCommunityMessage(supabase, conversationId, userId, previewBody, lastMessageAt);
 
   return { message: formatted };
 }
@@ -353,7 +381,7 @@ async function withReplyTo(supabase: SupabaseClient, m: any) {
   if (!m.reply_to_id) return m;
   const { data: reply } = await supabase
     .from("messages")
-    .select("id, body, sender_id, type, deleted_at")
+    .select("id, body, sender_id, type, deleted_at, media_key, media_type")
     .eq("id", m.reply_to_id)
     .maybeSingle();
   return { ...m, replyTo: reply ?? null };
@@ -556,6 +584,7 @@ export async function updateMessage(
 // Media originals have no body; give the reply chip a readable label.
 function replyBodyFor(r: any): string | null {
   if (r.deleted_at) return "Message deleted";
+  if (r.type === "sticker") return "Sticker";
   if (r.body) return r.body;
   switch (r.type) {
     case "image": return "Photo";
@@ -581,7 +610,7 @@ function formatMessage(m: any) {
     media_url: resolveAvatarUrl(m.media_key),
     media_type: m.media_type,
     reactions: m.reactions ?? {},
-    reply_to: m.replyTo ? { id: m.replyTo.id, body: replyBodyFor(m.replyTo) } : null,
+    reply_to: m.replyTo ? { id: m.replyTo.id, body: replyBodyFor(m.replyTo), type: m.replyTo.type, media_url: m.replyTo.deleted_at ? null : resolveAvatarUrl(m.replyTo.media_key) } : null,
     shared_post: m.sharedPost ? formatSharedPost(m.sharedPost) : null,
     sender: m.sender ? {
       id: m.sender.id, name: m.sender.name, username: m.sender.username,
@@ -687,7 +716,8 @@ export async function getConversationInfo(
   const { data: others } = await supabase
     .from("conversation_participants").select("user_id")
     .eq("conversation_id", conversationId).neq("user_id", userId);
-  const peerId: number | null = others?.[0]?.user_id ?? null;
+  const { data: convMeta } = await supabase.from("conversations").select("community_id").eq("id", conversationId).maybeSingle();
+  const peerId: number | null = convMeta?.community_id ? null : (others?.[0]?.user_id ?? null);
 
   let lastSeen: string | null = null;
   if (peerId && !(await isBlockedEitherWay(supabase, userId, peerId))) {

@@ -192,7 +192,7 @@ export async function createPost(
   userId: number,
   user: any,
   input: CreatePostInput,
-  opts: { trustedSource?: boolean } = {},
+  opts: { trustedSource?: boolean; community?: { id: number; publisher: { id: number; name: string; type: string; institution_id: number | null } } } = {},
 ) {
   const type = input.type ?? TYPE_POST;
   if (![TYPE_POST, TYPE_STORY, TYPE_LISTING].includes(type)) {
@@ -218,7 +218,7 @@ export async function createPost(
     if (prep && !prep.ok) throw new ValidationError(prep.errors);
     if (prep && prep.ok) {
       if (prep.subtype === "announcement") {
-        const pub = await resolvePublisher(supabase, userId, prep.publisherId);
+        const pub = opts.community ? opts.community.publisher : await resolvePublisher(supabase, userId, prep.publisherId);
         if (!pub) throw new ValidationError({ publisher: "You are not authorised to publish as this identity." });
         prep.content.publisher = { id: pub.id, name: pub.name, type: pub.type };
         (prep as { institutionId?: number | null }).institutionId = pub.institution_id;
@@ -262,6 +262,13 @@ export async function createPost(
     client_request_id: requestId,
   };
   if (structured) postData.content = structured.content;
+  if (opts.community) {
+    postData.community_id = opts.community.id;
+    postData.community_feed = true;
+    postData.visibility = "private";
+    postData.hashtags = [];
+    postData.allow_duet = false;
+  }
 
   if (type === TYPE_STORY) {
     const hours = input.expires_hours ?? 24;

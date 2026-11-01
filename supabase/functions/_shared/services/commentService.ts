@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "../auth.ts";
+import { isStaff, loadAccess } from "./communityAccess.ts";
 
 const PAGE_SIZE = 20;
 
@@ -138,10 +139,11 @@ export async function deleteComment(supabase: SupabaseClient, commentId: number,
   if (error) throw error;
   if (!comment) return { notFound: true as const };
 
-  const { data: post } = await supabase.from("posts").select("user_id, comments_count").eq("id", comment.post_id).maybeSingle();
+  const { data: post } = await supabase.from("posts").select("user_id, comments_count, community_id").eq("id", comment.post_id).maybeSingle();
 
   if (comment.user_id !== userId && post?.user_id !== userId) {
-    return { unauthorized: true as const };
+    const a = post?.community_id ? await loadAccess(supabase, post.community_id, userId) : null;
+    if (!a || !isStaff(a)) return { unauthorized: true as const };
   }
 
   if (!comment.parent_id && post) {

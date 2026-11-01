@@ -28,6 +28,7 @@ import {
 import { getUserLikedPosts, togglePinned } from "../_shared/services/userService.ts";
 import { addToStory } from "./add-to-story.ts";
 import { sharePost } from "./share.ts";
+import { keepAccessible, postGate } from "../_shared/services/postAccess.ts";
 
 const CDN_BASE = Deno.env.get("CDN_BASE_URL") ?? "";
 
@@ -55,6 +56,22 @@ app.onError((err) => {
 });
 
 app.notFound(() => json({ message: "Not found." }, 404));
+
+// Visibility gate: every route that takes a post id answers 404 unless this viewer may see the post.
+const NO_COMMUNITY = new Set(["repost", "add-to-story"]);
+for (const route of ["show", "like", "bookmark", "repost", "view", "share", "add-to-story"]) {
+  app.use(`/${route}/:postId`, async (c, next) => {
+    const postId = parseInt(c.req.param("postId") ?? "", 10);
+    if (postId) {
+      const supabase = serviceClient();
+      const userId = await requireAuth(c.req.raw, supabase);
+      const g = await postGate(supabase, userId, postId);
+      if (!g.ok) return json({ message: "Not found." }, 404);
+      if (g.community && NO_COMMUNITY.has(route)) return json({ message: "Community posts can't be shared outside the community." }, 403);
+    }
+    await next();
+  });
+}
 
 // ── create / read / update / delete ─────────────────────────────────────────
 
@@ -247,7 +264,8 @@ app.all("/liked", async (c) => {
   const userId = await requireAuth(c.req.raw, supabase);
   const cursor = c.req.query("cursor") ?? null;
 
-  const result = await getUserLikedPosts(supabase, userId, cursor);
+  const liked0 = await getUserLikedPosts(supabase, userId, cursor);
+  const result = { ...liked0, page: await keepAccessible(supabase, userId, liked0.page, (p: any) => p) };
   const likedIds = result.page.map((p: any) => p.id);
   const bookmarkedSet = await getBookmarkedIds(supabase, userId, likedIds);
   const repostedSet = await getRepostedIds(supabase, userId, likedIds);
@@ -271,7 +289,9 @@ app.all("/bookmarks", async (c) => {
   const type = c.req.query("type") ?? null;
   const page = parseInt(c.req.query("page") ?? "1", 10);
 
-  const { rows, hasMore } = await listBookmarks(supabase, userId, type, page);
+  const listed = await listBookmarks(supabase, userId, type, page);
+  const hasMore = listed.hasMore;
+  const rows = await keepAccessible(supabase, userId, listed.rows, (b: any) => b.post);
   await batchAttachAudio(supabase, rows.map((b: any) => b.post));
 
   // Every row here is, by definition, bookmarked by this viewer, so no need

@@ -149,6 +149,10 @@ function announcement(c: Obj, media: MediaLike[]): Prepared {
   if (deadlineAt === undefined) e.deadline_at = "Invalid deadline.";
   const pid = Number(c.publisher_id);
   if (!Number.isInteger(pid) || pid <= 0) e.publisher = "Choose who is publishing.";
+  const priority = c.priority === "important" ? "important" : "normal";
+  const expiresAt = optDate(c.expires_at);
+  if (expiresAt === undefined) e.expires_at = "Invalid expiry.";
+  else if (expiresAt !== null && Date.parse(expiresAt) < Date.now() + 60_000) e.expires_at = "Expiry must be in the future.";
   if (media.length > LIMITS.annMedia) e.media = `Attach up to ${LIMITS.annMedia} files.`;
   else for (const m of media) {
     if (m.type === "document") checkDoc(m, e);
@@ -156,7 +160,7 @@ function announcement(c: Obj, media: MediaLike[]): Prepared {
   }
   if (Object.keys(e).length) return fail(e);
   return ok("announcement", title, {
-    kind: "announcement", title, body, event_at: eventAt, deadline_at: deadlineAt, publisher: null,
+    kind: "announcement", title, body, event_at: eventAt, deadline_at: deadlineAt, publisher: null, priority, expires_at: expiresAt,
   }, pid);
 }
 

@@ -30,6 +30,7 @@ Deno.serve(async (req) => {
       if (!s) return json({ message: "Poll not found." }, 404);
       if (s.closed) return json({ message: "Voting has closed." }, 409);
       if (s.mine.length) return json({ message: "You already voted." }, 409);
+      if (!s.can_vote) return json({ message: "Join this community to vote." }, 403);
       if (optionIds.some((n) => n >= s.options)) return json({ message: "Invalid option." }, 422);
       if (!s.multiple && optionIds.length !== 1) return json({ message: "Choose one option." }, 422);
 

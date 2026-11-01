@@ -1,4 +1,4 @@
-// supabase/functions/communities-join/index.ts
+// Legacy toggle used by the Flutter app. Goes through the same join policy as /communities/join.
 /// <reference path="../_shared/deno-shim.d.ts" />
 import { serviceClient, requireAuth, AuthError } from "../_shared/auth.ts";
 import { json, handleCors } from "../_shared/response.ts";
@@ -15,7 +15,6 @@ Deno.serve(async (req) => {
 
     const result = await toggleMembership(supabase, communityId, userId);
     if ("notFound" in result) return json({ message: "Not found." }, 404);
-
     return json(result);
   } catch (err) {
     if (err instanceof AuthError) return json({ message: err.message }, err.status);

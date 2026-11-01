@@ -121,7 +121,7 @@ async function messageRows(supabase: SupabaseClient, me: Me): Promise<any[]> {
   }
 
   const [{ data: convs }, { data: others }, { data: shares }, prefs] = await Promise.all([
-    supabase.from("conversations").select("id, last_message_body, last_message_at")
+    supabase.from("conversations").select("id, last_message_body, last_message_at, community_id")
       .in("id", ids).eq("is_active", true),
     supabase.from("conversation_participants")
       .select("conversation_id, user:users(id, name, username, avatar_key, avatar)")
@@ -138,7 +138,7 @@ async function messageRows(supabase: SupabaseClient, me: Me): Promise<any[]> {
   const out: any[] = [];
   for (const part of parts as any[]) {
     const conv: any = convMap.get(part.conversation_id);
-    if (!conv) continue;
+    if (!conv || conv.community_id) continue;
     const unread = part.unread_count as number;
 
     const readAt = part.last_read_at ? Date.parse(iso(part.last_read_at)) : 0;

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "../auth.ts";
+import { canRead, loadAccess, type Access } from "./communityAccess.ts";
 import { canViewPost } from "./contentAccess.ts";
 
 export interface PollState {
@@ -17,16 +18,35 @@ export async function pollStates(supabase: SupabaseClient, viewerId: number, ids
   if (!ids.length) return out;
 
   const { data: posts, error } = await supabase.from("posts")
-    .select("id, user_id, type, subtype, visibility, institution_id, context, content, is_active, processing_status, deleted_at")
+    .select("id, user_id, type, subtype, visibility, institution_id, context, content, is_active, processing_status, deleted_at, community_id")
     .in("id", ids);
   if (error) throw error;
 
   const polls = (posts ?? []).filter((p: any) =>
     p.type === "post" && p.subtype === "poll" && p.is_active && !p.deleted_at &&
     p.processing_status === "ready" && Array.isArray(p.content?.options));
+
+  // Community polls are private posts: they follow the community's access rules, not canViewPost.
+  const access = new Map<number, Access | null>();
+  const cids = [...new Set(polls.map((p: any) => p.community_id).filter(Boolean))] as number[];
+  await Promise.all(cids.map(async (id) => { access.set(id, await loadAccess(supabase, id, viewerId)); }));
+
   const visible: any[] = [];
-  await Promise.all(polls.map(async (p: any) => { if (await canViewPost(supabase, viewerId, p)) visible.push(p); }));
+  await Promise.all(polls.map(async (p: any) => {
+    if (p.community_id) {
+      const a = access.get(p.community_id);
+      if (a && canRead(a)) visible.push(p);
+    } else if (await canViewPost(supabase, viewerId, p)) {
+      visible.push(p);
+    }
+  }));
   if (!visible.length) return out;
+
+  const memberOk = (p: any) => {
+    if (!p.community_id) return true;
+    const a = access.get(p.community_id);
+    return !!a && !!a.role && !a.banned && a.community.status === "active";
+  };
 
   const vids = visible.map((p) => p.id);
   const [tally, mine] = await Promise.all([
@@ -59,7 +79,7 @@ export async function pollStates(supabase: SupabaseClient, viewerId: number, ids
       total: showResults ? counts.reduce((a, b) => a + b, 0) : null,
       counts: showResults ? counts : null,
       mine: my,
-      can_vote: !closed && my.length === 0,
+      can_vote: !closed && my.length === 0 && memberOk(p),
     };
   }
   return out;

@@ -10,6 +10,7 @@ import {
   locateComment,
   toggleCommentLike,
 } from "../_shared/services/commentService.ts";
+import { postGate } from "../_shared/services/postAccess.ts";
 
 const CDN_BASE = Deno.env.get("CDN_BASE_URL") ?? "";
 
@@ -34,6 +35,31 @@ app.onError((err) => {
 });
 
 app.notFound(() => json({ message: "Not found." }, 404));
+
+// Visibility gate: comments follow their post's audience.
+for (const route of ["list", "store", "locate"]) {
+  app.use(`/${route}/:postId`, async (c, next) => {
+    const postId = parseInt(c.req.param("postId") ?? "", 10);
+    if (postId) {
+      const supabase = serviceClient();
+      const userId = await requireAuth(c.req.raw, supabase);
+      if (!(await postGate(supabase, userId, postId)).ok) return json({ message: "Not found." }, 404);
+    }
+    await next();
+  });
+}
+for (const route of ["replies", "like"]) {
+  app.use(`/${route}/:commentId`, async (c, next) => {
+    const commentId = parseInt(c.req.param("commentId") ?? "", 10);
+    if (commentId) {
+      const supabase = serviceClient();
+      const userId = await requireAuth(c.req.raw, supabase);
+      const { data: cm } = await supabase.from("comments").select("post_id").eq("id", commentId).maybeSingle();
+      if (cm && !(await postGate(supabase, userId, cm.post_id)).ok) return json({ message: "Not found." }, 404);
+    }
+    await next();
+  });
+}
 
 app.all("/list/:postId", async (c) => {
   const supabase = serviceClient();

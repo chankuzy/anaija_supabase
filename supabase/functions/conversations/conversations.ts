@@ -57,6 +57,7 @@ export function registerConversations(app: Hono<any, any, any>) {
 
     const body = await c.req.json();
     const result = await sendMessage(supabase, conversationId, userId, body, CDN_BASE);
+    if ("forbidden" in result) return json({ message: result.forbidden }, 403);
     if ("invalidMedia" in result) return json({ message: "Invalid media." }, 422);
     if ("blocked" in result) return json({ message: "You can't message this user." }, 403);
     if ("requestLimitReached" in result) {

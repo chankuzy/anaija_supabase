@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "../auth.ts";
+import { canRead, loadAccess } from "./communityAccess.ts";
 
 export interface Publisher { id: number; name: string; type: string; institution_id: number | null }
 
@@ -6,9 +7,14 @@ export interface Publisher { id: number; name: string; type: string; institution
 export async function canViewPost(
   supabase: SupabaseClient,
   viewerId: number,
-  post: { user_id: number; visibility: string; institution_id?: number | null; context?: { institution_id?: number | null } | null },
+  post: { user_id: number; visibility: string; institution_id?: number | null; community_id?: number | null; community_feed?: boolean | null; context?: { institution_id?: number | null } | null },
 ): Promise<boolean> {
   if (post.user_id === viewerId) return true;
+  if (post.community_id) {
+    const a = await loadAccess(supabase, post.community_id, viewerId);
+    if (!a || a.banned) return false;
+    return post.community_feed === false ? !!a.role : canRead(a);
+  }
   switch (post.visibility) {
     case "public":
       return true;

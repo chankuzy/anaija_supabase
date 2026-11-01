@@ -1,0 +1,420 @@
+/// <reference path="../_shared/deno-shim.d.ts" />
+import type { Hono } from "hono";
+import { requireAuth, serviceClient, verifyTokenOptional, type SupabaseClient } from "../_shared/auth.ts";
+import { resolveAvatarUrl } from "../_shared/avatar.ts";
+import { json } from "../_shared/response.ts";
+import { HttpError, can, canRead, isStaff, loadAccess } from "../_shared/services/communityAccess.ts";
+import { broadcastBatch } from "../_shared/services/realtimeService.ts";
+
+// Anonymous Sessions. session_posts.author_id is read server-side only (rate limits, blocks, is_mine) and is NEVER returned.
+// Moderation log entries deliberately omit the author. Realtime carries only a "changed" hint; clients refetch.
+const COLS = "id, community_id, host_id, code, type, title, description, status, starts_at, ends_at, ended_at, allow_preview, replies_enabled, reactions_enabled, realtime_key, posts_count, participants_count, created_at";
+const PAGE = 30;
+const REACTIONS = ["like", "fire", "laugh", "wow", "sad"];
+const REASONS = ["spam", "harassment", "hate", "sexual", "violence", "misinformation", "privacy", "other"];
+const ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
+// deno-lint-ignore no-control-regex
+const CTRL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
+
+const int = (v: unknown) => {
+  const n = parseInt(String(v ?? ""), 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
+const newCode = () => Array.from(crypto.getRandomValues(new Uint8Array(10)), (b) => ALPHABET[b % ALPHABET.length]).join("");
+const clean = (v: unknown, max: number) => {
+  if (typeof v !== "string") return "";
+  return v.replace(/\r\n?/g, "\n").replace(CTRL, "").trim().replace(/\n{3,}/g, "\n\n").slice(0, max);
+};
+const isoOrNull = (v: unknown): string | null | undefined => {
+  if (v === undefined || v === null || v === "") return null;
+  if (typeof v !== "string") return undefined;
+  const t = Date.parse(v);
+  return Number.isFinite(t) ? new Date(t).toISOString() : undefined;
+};
+const ping = (s: any, kind: string) =>
+  broadcastBatch([{ topic: `session:${s.realtime_key}`, event: "changed", payload: { kind } }]);
+
+/** scheduled -> live -> ended, evaluated on read so it is correct even if cron lags. */
+async function settle(supabase: SupabaseClient, s: any) {
+  const now = Date.now();
+  let status = s.status as string;
+  if (status !== "ended" && s.ends_at && Date.parse(s.ends_at) <= now) status = "ended";
+  else if (status === "scheduled" && (!s.starts_at || Date.parse(s.starts_at) <= now)) status = "live";
+  if (status === s.status) return s;
+  const patch: Record<string, unknown> = status === "ended" ? { status, ended_at: s.ends_at ?? new Date().toISOString() } : { status };
+  await supabase.from("community_sessions").update(patch).eq("id", s.id).eq("status", s.status);
+  return { ...s, ...patch };
+}
+
+async function loadSession(supabase: SupabaseClient, codeRaw: string) {
+  const code = String(codeRaw ?? "").toLowerCase();
+  if (!/^[a-z0-9]{6,20}$/.test(code)) throw new HttpError(404, "Session not found.");
+  const { data, error } = await supabase.from("community_sessions").select(COLS).eq("code", code).eq("is_archived", false).maybeSingle();
+  if (error) throw error;
+  if (!data) throw new HttpError(404, "Session not found.");
+  return await settle(supabase, data);
+}
+
+async function standing(supabase: SupabaseClient, s: any, viewer: number | null) {
+  const a = await loadAccess(supabase, s.community_id, viewer);
+  if (!a) throw new HttpError(404, "Session not found.");
+  if (a.banned) throw new HttpError(403, "You can't access this community.");
+  const member = !!a.role;
+  let blocked = false;
+  let muted = false;
+  if (viewer && member) {
+    const [b, m] = await Promise.all([
+      supabase.from("session_blocks").select("user_id").eq("session_id", s.id).eq("user_id", viewer).maybeSingle(),
+      supabase.from("community_members").select("muted_until").eq("community_id", s.community_id).eq("user_id", viewer).maybeSingle(),
+    ]);
+    blocked = !!b.data;
+    muted = !!(m.data?.muted_until && new Date(m.data.muted_until) > new Date());
+  }
+  const canView = member || (s.allow_preview && a.community.read_policy === "public_preview");
+  const live = s.status === "live" && a.community.status === "active";
+  const host = !!viewer && viewer === s.host_id;
+  return {
+    a, member, blocked, muted, canView, host,
+    canPost: member && live && !blocked && !muted,
+    canReply: member && live && !blocked && !muted && s.replies_enabled,
+    canReact: member && live && !blocked && s.reactions_enabled,
+    moderate: host || isStaff(a),
+  };
+}
+
+async function sessionView(supabase: SupabaseClient, s: any, st: Awaited<ReturnType<typeof standing>>, viewer: number | null) {
+  const { data: h } = await supabase.from("users").select("name, username, avatar_key, avatar").eq("id", s.host_id).maybeSingle();
+  const c = st.a.community;
+  return {
+    id: s.id, code: s.code, path: `/s/${s.code}`, type: s.type, title: s.title,
+    description: st.canView ? s.description : null,
+    status: s.status, starts_at: s.starts_at, ends_at: s.ends_at, ended_at: s.ended_at,
+    allow_preview: s.allow_preview, replies_enabled: s.replies_enabled, reactions_enabled: s.reactions_enabled,
+    posts_count: st.canView ? s.posts_count : 0, participants_count: st.canView ? s.participants_count : 0,
+    created_at: s.created_at,
+    realtime_key: st.canView ? s.realtime_key : null,
+    host: h ? { name: h.name, username: h.username, avatar: resolveAvatarUrl(h.avatar_key ?? h.avatar) } : null,
+    community: { id: c.id, name: c.name, slug: c.slug, avatar: resolveAvatarUrl(c.avatar_key), members_count: c.members_count, join_policy: c.join_policy, read_policy: c.read_policy },
+    viewer: {
+      authenticated: viewer !== null, is_member: st.member, can_view: st.canView,
+      can_post: st.canPost, can_reply: st.canReply, can_react: st.canReact,
+      is_host: st.host, can_moderate: st.moderate, blocked: st.blocked, muted: st.muted,
+      join: st.member ? null : c.join_policy, // open | request | invite
+    },
+  };
+}
+
+async function formatPosts(supabase: SupabaseClient, rows: any[], viewer: number | null) {
+  const mine = new Map<number, string>();
+  if (viewer && rows.length) {
+    const { data } = await supabase.from("session_reactions").select("post_id, kind").eq("user_id", viewer).in("post_id", rows.map((r) => r.id));
+    for (const r of data ?? []) mine.set(r.post_id, r.kind);
+  }
+  return rows.map((r) => ({
+    id: r.id, parent_id: r.parent_id, alias: `Anon ${r.alias_no}`, body: r.body,
+    reactions_count: r.reactions_count, replies_count: r.replies_count, created_at: r.created_at,
+    is_mine: viewer !== null && r.author_id === viewer, my_reaction: mine.get(r.id) ?? null,
+  }));
+}
+const POST_COLS = "id, parent_id, author_id, alias_no, body, reactions_count, replies_count, created_at";
+
+async function removePost(supabase: SupabaseClient, s: any, actor: number, postId: number, reason: string | null, block: boolean) {
+  const { data: p } = await supabase.from("session_posts").select("id, author_id, removed_at").eq("id", postId).eq("session_id", s.id).maybeSingle();
+  if (!p) throw new HttpError(404, "Post not found.");
+  if (!p.removed_at) {
+    await supabase.from("session_posts").update({ removed_at: new Date().toISOString(), removed_by: actor, removed_reason: reason }).eq("id", postId);
+  }
+  if (block) {
+    await supabase.from("session_blocks").upsert({ session_id: s.id, user_id: p.author_id, blocked_by: actor, reason }, { onConflict: "session_id,user_id", ignoreDuplicates: true });
+  }
+  await supabase.from("content_reports").update({ status: "actioned", handled_by: actor, handled_at: new Date().toISOString() })
+    .eq("community_id", s.community_id).eq("target_kind", "session_post").eq("target_id", postId).eq("status", "open");
+  // No target_user_id on purpose: moderators never learn who wrote it.
+  await supabase.from("community_mod_log").insert({
+    community_id: s.community_id, actor_id: actor, action: block ? "remove_session_post_block" : "remove_session_post",
+    target_kind: "session_post", target_id: postId, note: reason?.slice(0, 200) ?? null,
+  });
+  await ping(s, "removed");
+}
+
+export function registerSessions(app: Hono<any, any, any>) {
+  app.post("/session-create/:id", async (c) => {
+    const supabase = serviceClient();
+    const userId = await requireAuth(c.req.raw, supabase);
+    const a = await loadAccess(supabase, int(c.req.param("id")) ?? 0, userId);
+    if (!a) throw new HttpError(404, "Not found.");
+    if (!can(a, "session")) throw new HttpError(403, "You can't create sessions in this community.");
+    const b = await c.req.json().catch(() => ({}));
+
+    const errors: Record<string, string> = {};
+    const title = clean(b?.title, 120).replace(/\s+/g, " ");
+    if (!title) errors.title = "Give the session a title.";
+    const description = clean(b?.description, 500) || null;
+    const startsAt = isoOrNull(b?.starts_at);
+    const endsAt = isoOrNull(b?.ends_at);
+    if (startsAt === undefined) errors.starts_at = "Invalid start time.";
+    if (endsAt === undefined) errors.ends_at = "Invalid end time.";
+    const now = Date.now();
+    if (typeof startsAt === "string" && Date.parse(startsAt) > now + 90 * 86_400_000) errors.starts_at = "Start within 90 days.";
+    const base = typeof startsAt === "string" ? Math.max(Date.parse(startsAt), now) : now;
+    if (typeof endsAt === "string") {
+      const t = Date.parse(endsAt);
+      if (t < base + 60_000) errors.ends_at = "End time must be after the start.";
+      else if (t > base + 30 * 86_400_000) errors.ends_at = "Sessions can run for up to 30 days.";
+    }
+    if (Object.keys(errors).length) throw new HttpError(422, "Validation failed.", errors);
+
+    const { count: open } = await supabase.from("community_sessions").select("id", { count: "exact", head: true })
+      .eq("community_id", a.community.id).in("status", ["scheduled", "live"]).eq("is_archived", false);
+    if ((open ?? 0) >= 5) throw new HttpError(422, "End a running session before starting another.");
+    const since = new Date(now - 86_400_000).toISOString();
+    const { count: day } = await supabase.from("community_sessions").select("id", { count: "exact", head: true })
+      .eq("host_id", userId).gte("created_at", since);
+    if ((day ?? 0) >= 10) throw new HttpError(429, "You've created a lot of sessions today.");
+
+    const status = typeof startsAt === "string" && Date.parse(startsAt) > now + 30_000 ? "scheduled" : "live";
+    let created: any = null;
+    for (let i = 0; i < 5 && !created; i++) {
+      const { data, error } = await supabase.from("community_sessions").insert({
+        community_id: a.community.id, host_id: userId, code: newCode(), title, description, status,
+        starts_at: startsAt, ends_at: endsAt,
+        allow_preview: b?.allow_preview !== false, replies_enabled: b?.replies_enabled !== false, reactions_enabled: b?.reactions_enabled !== false,
+      }).select(COLS).single();
+      if (!error) created = data;
+      else if ((error as { code?: string }).code !== "23505") throw error;
+    }
+    if (!created) throw new HttpError(409, "Couldn't create a link. Try again.");
+    await supabase.from("community_mod_log").insert({ community_id: a.community.id, actor_id: userId, action: "create_session", target_kind: "session", target_id: created.id });
+    const st = await standing(supabase, created, userId);
+    return json({ session: await sessionView(supabase, created, st, userId) }, 201);
+  });
+
+  // Sessions of one community (cards for the Feed and a Sessions list).
+  app.get("/sessions/:ref", async (c) => {
+    const supabase = serviceClient();
+    const viewer = await verifyTokenOptional(c.req.raw, supabase);
+    const a = await loadAccess(supabase, c.req.param("ref"), viewer);
+    if (!a) throw new HttpError(404, "Not found.");
+    if (a.banned) throw new HttpError(403, "You can't access this community.");
+    if (!canRead(a)) return json({ data: [] });
+    const { data, error } = await supabase.from("community_sessions").select(COLS)
+      .eq("community_id", a.community.id).eq("is_archived", false)
+      .order("id", { ascending: false }).limit(20);
+    if (error) throw error;
+    const rows = await Promise.all((data ?? []).map((s: any) => settle(supabase, s)));
+    return json({
+      data: rows.filter((s: any) => a.role || s.allow_preview).map((s: any) => ({
+        id: s.id, code: s.code, path: `/s/${s.code}`, title: s.title, status: s.status,
+        starts_at: s.starts_at, ends_at: s.ends_at, posts_count: s.posts_count, participants_count: s.participants_count, created_at: s.created_at,
+      })),
+    });
+  });
+
+  // Landing + header. Safe for guests: returns what the viewer may know, plus what they would need to do to get in.
+  app.get("/session/:code", async (c) => {
+    const supabase = serviceClient();
+    const viewer = await verifyTokenOptional(c.req.raw, supabase);
+    const s = await loadSession(supabase, c.req.param("code"));
+    const st = await standing(supabase, s, viewer);
+    return json({ session: await sessionView(supabase, s, st, viewer) });
+  });
+
+  app.get("/session-feed/:code", async (c) => {
+    const supabase = serviceClient();
+    const viewer = await verifyTokenOptional(c.req.raw, supabase);
+    const s = await loadSession(supabase, c.req.param("code"));
+    const st = await standing(supabase, s, viewer);
+    if (!st.canView) throw new HttpError(403, "Join this community to see this session.");
+    const cursor = int(c.req.query("cursor")) ?? Number.MAX_SAFE_INTEGER;
+    const { data, error } = await supabase.from("session_posts").select(POST_COLS)
+      .eq("session_id", s.id).is("parent_id", null).is("removed_at", null).lt("id", cursor)
+      .order("id", { ascending: false }).limit(PAGE + 1);
+    if (error) throw error;
+    const rows = data ?? [];
+    const page = rows.slice(0, PAGE);
+    return json({
+      posts: await formatPosts(supabase, page, viewer),
+      next_cursor: rows.length > PAGE ? String(page[page.length - 1].id) : null,
+      has_more: rows.length > PAGE,
+    });
+  });
+
+  app.get("/session-replies/:code", async (c) => {
+    const supabase = serviceClient();
+    const viewer = await verifyTokenOptional(c.req.raw, supabase);
+    const s = await loadSession(supabase, c.req.param("code"));
+    const st = await standing(supabase, s, viewer);
+    if (!st.canView) throw new HttpError(403, "Join this community to see this session.");
+    const parent = int(c.req.query("post_id"));
+    if (!parent) return json({ message: "post_id is required." }, 422);
+    const { data, error } = await supabase.from("session_posts").select(POST_COLS)
+      .eq("session_id", s.id).eq("parent_id", parent).is("removed_at", null).order("id", { ascending: true }).limit(200);
+    if (error) throw error;
+    return json({ replies: await formatPosts(supabase, data ?? [], viewer) });
+  });
+
+  app.post("/session-post/:code", async (c) => {
+    const supabase = serviceClient();
+    const userId = await requireAuth(c.req.raw, supabase);
+    const s = await loadSession(supabase, c.req.param("code"));
+    const st = await standing(supabase, s, userId);
+    if (!st.member) throw new HttpError(403, "Join the community to post.");
+    if (s.status === "scheduled") throw new HttpError(409, "This session hasn't started yet.");
+    if (s.status === "ended" || st.a.community.status !== "active") throw new HttpError(409, "This session has ended.");
+    if (st.blocked) throw new HttpError(403, "You can't post in this session.");
+    if (st.muted) throw new HttpError(403, "You're muted in this community right now.");
+
+    const b = await c.req.json().catch(() => ({}));
+    const body = clean(b?.body, 1000);
+    if (!body) return json({ message: "Write something first." }, 422);
+    const parentId = b?.parent_id == null ? null : int(b.parent_id);
+    if (b?.parent_id != null && !parentId) return json({ message: "Invalid reply target." }, 422);
+    if (parentId) {
+      if (!s.replies_enabled) throw new HttpError(403, "Replies are turned off for this session.");
+      const { data: p } = await supabase.from("session_posts").select("id, session_id, parent_id, removed_at").eq("id", parentId).maybeSingle();
+      if (!p || p.session_id !== s.id || p.parent_id !== null || p.removed_at) throw new HttpError(404, "That post isn't available.");
+    }
+
+    const minute = new Date(Date.now() - 60_000).toISOString();
+    const hour = new Date(Date.now() - 3_600_000).toISOString();
+    const [m, h, dup] = await Promise.all([
+      supabase.from("session_posts").select("id", { count: "exact", head: true }).eq("session_id", s.id).eq("author_id", userId).gte("created_at", minute),
+      supabase.from("session_posts").select("id", { count: "exact", head: true }).eq("session_id", s.id).eq("author_id", userId).gte("created_at", hour),
+      supabase.from("session_posts").select("id").eq("session_id", s.id).eq("author_id", userId).eq("body", body)
+        .gte("created_at", new Date(Date.now() - 600_000).toISOString()).limit(1),
+    ]);
+    if ((m.count ?? 0) >= 4) throw new HttpError(429, "Slow down a little.");
+    if ((h.count ?? 0) >= 40) throw new HttpError(429, "You've posted a lot here. Try again later.");
+    if ((dup.data ?? []).length) throw new HttpError(409, "You already posted that.");
+
+    const alias = await supabase.rpc("session_alias", { p_session: s.id, p_user: userId });
+    if (alias.error) throw alias.error;
+    const { data: row, error } = await supabase.from("session_posts")
+      .insert({ session_id: s.id, parent_id: parentId, author_id: userId, alias_no: alias.data as number, body })
+      .select(POST_COLS).single();
+    if (error) throw error;
+    await ping(s, parentId ? "reply" : "post");
+    return json({ post: (await formatPosts(supabase, [row], userId))[0] }, 201);
+  });
+
+  app.post("/session-react/:code", async (c) => {
+    const supabase = serviceClient();
+    const userId = await requireAuth(c.req.raw, supabase);
+    const s = await loadSession(supabase, c.req.param("code"));
+    const st = await standing(supabase, s, userId);
+    if (!st.canReact) throw new HttpError(403, s.status === "live" ? "Reactions aren't available to you here." : "This session is read-only.");
+    const b = await c.req.json().catch(() => ({}));
+    const postId = int(b?.post_id);
+    const kind = REACTIONS.includes(b?.kind) ? b.kind : "like";
+    if (!postId) return json({ message: "post_id is required." }, 422);
+    const { data: p } = await supabase.from("session_posts").select("id").eq("id", postId).eq("session_id", s.id).is("removed_at", null).maybeSingle();
+    if (!p) throw new HttpError(404, "Post not found.");
+    const { data: ex } = await supabase.from("session_reactions").select("kind").eq("post_id", postId).eq("user_id", userId).maybeSingle();
+    let mine: string | null = kind;
+    if (ex && ex.kind === kind) {
+      await supabase.from("session_reactions").delete().eq("post_id", postId).eq("user_id", userId);
+      mine = null;
+    } else {
+      const { error } = await supabase.from("session_reactions").upsert({ post_id: postId, user_id: userId, kind }, { onConflict: "post_id,user_id" });
+      if (error) throw error;
+    }
+    const { data: fresh } = await supabase.from("session_posts").select("reactions_count").eq("id", postId).maybeSingle();
+    return json({ reactions_count: fresh?.reactions_count ?? 0, my_reaction: mine });
+  });
+
+  app.post("/session-end/:code", async (c) => {
+    const supabase = serviceClient();
+    const userId = await requireAuth(c.req.raw, supabase);
+    const s = await loadSession(supabase, c.req.param("code"));
+    const st = await standing(supabase, s, userId);
+    if (!st.moderate) throw new HttpError(403, "Only the host or a moderator can end this session.");
+    if (s.status === "ended") throw new HttpError(409, "This session has already ended.");
+    const at = new Date().toISOString();
+    const { error } = await supabase.from("community_sessions").update({ status: "ended", ended_at: at, ended_by: userId }).eq("id", s.id);
+    if (error) throw error;
+    await supabase.from("community_mod_log").insert({ community_id: s.community_id, actor_id: userId, action: "end_session", target_kind: "session", target_id: s.id });
+    await ping(s, "ended");
+    return json({ status: "ended", ended_at: at });
+  });
+
+  app.post("/session-remove/:code", async (c) => {
+    const supabase = serviceClient();
+    const userId = await requireAuth(c.req.raw, supabase);
+    const s = await loadSession(supabase, c.req.param("code"));
+    const st = await standing(supabase, s, userId);
+    if (!st.moderate) throw new HttpError(403, "Only the host or a moderator can remove posts.");
+    const b = await c.req.json().catch(() => ({}));
+    const postId = int(b?.post_id);
+    if (!postId) return json({ message: "post_id is required." }, 422);
+    await removePost(supabase, s, userId, postId, clean(b?.reason, 200) || null, b?.block === true);
+    return json({ ok: true });
+  });
+
+  app.post("/session-report/:code", async (c) => {
+    const supabase = serviceClient();
+    const userId = await requireAuth(c.req.raw, supabase);
+    const s = await loadSession(supabase, c.req.param("code"));
+    const st = await standing(supabase, s, userId);
+    if (!st.canView) throw new HttpError(404, "Nothing to report.");
+    const b = await c.req.json().catch(() => ({}));
+    const postId = int(b?.post_id);
+    if (!postId || !REASONS.includes(b?.reason)) return json({ message: "post_id and reason are required." }, 422);
+    const { data: p } = await supabase.from("session_posts").select("id").eq("id", postId).eq("session_id", s.id).is("removed_at", null).maybeSingle();
+    if (!p) throw new HttpError(404, "Nothing to report.");
+    const since = new Date(Date.now() - 3_600_000).toISOString();
+    const { count } = await supabase.from("content_reports").select("id", { count: "exact", head: true }).eq("reporter_id", userId).gte("created_at", since);
+    if ((count ?? 0) >= 20) throw new HttpError(429, "You've sent a lot of reports. Please try again later.");
+    const { error } = await supabase.from("content_reports").insert({
+      reporter_id: userId, community_id: s.community_id, target_kind: "session_post", target_id: postId,
+      reason: b.reason, details: clean(b?.details, 500) || null,
+    });
+    if (error && (error as { code?: string }).code !== "23505") throw error;
+    return json({ ok: true, already_reported: !!error }, error ? 200 : 201);
+  });
+
+  app.get("/session-reports/:code", async (c) => {
+    const supabase = serviceClient();
+    const userId = await requireAuth(c.req.raw, supabase);
+    const s = await loadSession(supabase, c.req.param("code"));
+    const st = await standing(supabase, s, userId);
+    if (!st.moderate) throw new HttpError(403, "Only the host or a moderator can see reports.");
+    const status = ["open", "actioned", "dismissed"].includes(c.req.query("status") ?? "") ? c.req.query("status")! : "open";
+    const { data: reps, error } = await supabase.from("content_reports").select("id, target_id, reason, details, status, created_at")
+      .eq("community_id", s.community_id).eq("target_kind", "session_post").eq("status", status)
+      .order("created_at", { ascending: false }).limit(100);
+    if (error) throw error;
+    const ids = (reps ?? []).map((r: any) => r.target_id);
+    const { data: posts } = ids.length
+      ? await supabase.from("session_posts").select("id, alias_no, body, removed_at").eq("session_id", s.id).in("id", ids)
+      : { data: [] as any[] };
+    const by = new Map((posts ?? []).map((p: any) => [p.id, p]));
+    return json({
+      data: (reps ?? []).filter((r: any) => by.has(r.target_id)).map((r: any) => {
+        const p: any = by.get(r.target_id);
+        return { ...r, preview: { alias: `Anon ${p.alias_no}`, body: p.body, removed: !!p.removed_at } };
+      }),
+    });
+  });
+
+  app.post("/session-report-handle/:code", async (c) => {
+    const supabase = serviceClient();
+    const userId = await requireAuth(c.req.raw, supabase);
+    const s = await loadSession(supabase, c.req.param("code"));
+    const st = await standing(supabase, s, userId);
+    if (!st.moderate) throw new HttpError(403, "Only the host or a moderator can handle reports.");
+    const b = await c.req.json().catch(() => ({}));
+    const reportId = int(b?.report_id);
+    if (!reportId || !["dismiss", "remove"].includes(b?.action)) return json({ message: "report_id and action are required." }, 422);
+    const { data: r } = await supabase.from("content_reports").select("id, target_id, status")
+      .eq("id", reportId).eq("community_id", s.community_id).eq("target_kind", "session_post").maybeSingle();
+    if (!r) throw new HttpError(404, "Report not found.");
+    if (r.status !== "open") throw new HttpError(409, "This report was already handled.");
+    if (b.action === "remove") {
+      await removePost(supabase, s, userId, r.target_id, "Reported content", b?.block === true);
+      return json({ status: "actioned" });
+    }
+    await supabase.from("content_reports").update({ status: "dismissed", handled_by: userId, handled_at: new Date().toISOString() })
+      .eq("community_id", s.community_id).eq("target_kind", "session_post").eq("target_id", r.target_id).eq("status", "open");
+    return json({ status: "dismissed" });
+  });
+}

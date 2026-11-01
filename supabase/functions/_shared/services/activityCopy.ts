@@ -22,6 +22,9 @@ const nm = (a?: Actor) => (a ? short(a.name?.trim() || a.username || "Someone") 
 const people = (n: number) => (n === 1 ? "1 person" : `${n} people`);
 const plural = (n: Noun) => (n === "reel" ? "reels" : n === "listing" ? "listings" : n === "story" ? "stories" : "posts");
 const QUOTED = new Set(["comment", "reply", "mention", "story_reply"]);
+const MOMENT_LABEL: Record<string, string> = {
+  hot_seat: "Hot Seat", verdict: "Community Verdict", confession_drop: "Confession Drop", dept_war: "Department War", one_question: "One Question",
+};
 
 function names(actors: Actor[], count: number): string {
   if (count <= 1) return nm(actors[0]);
@@ -147,6 +150,64 @@ export function renderActivity(item: any, ctx: RenderCtx): Rendered {
         title = `Your ${noun} just passed ${Number(p.n).toLocaleString()} likes`; dest = postDest();
       }
       break;
+    case "community_request": {
+      const where = p.community ? String(p.community) : "your community";
+      title = count > 1 ? `${people(count)} asked to join ${where}` : `${who} asked to join ${where}`;
+      dest = p.slug ? { kind: "community", slug: String(p.slug), tab: "about" } : { kind: "none" };
+      break;
+    }
+    case "community_decision": {
+      const where = p.community ? String(p.community) : "the community";
+      title = p.approved ? `Your request to join ${where} was approved` : `Your request to join ${where} wasn't approved`;
+      dest = p.approved && p.slug ? { kind: "community", slug: String(p.slug) } : { kind: "none" };
+      break;
+    }
+    case "community_announcement": {
+      const where = p.community ? String(p.community) : "your community";
+      title = `New announcement in ${where}`;
+      preview = p.title ? String(p.title) : null;
+      dest = p.post_id ? { kind: "post", post_id: Number(p.post_id) } : { kind: "none" };
+      break;
+    }
+    case "community_moderation": {
+      const where = p.community ? String(p.community) : "the community";
+      const msg: Record<string, string> = {
+        post_removed: `A moderator removed your post in ${where}`,
+        comment_removed: `A moderator removed your comment in ${where}`,
+        removed: `You were removed from ${where}`,
+        banned: `You were banned from ${where}`,
+        muted: `You were muted in ${where}`,
+      };
+      title = msg[String(p.action)] ?? `Moderation update in ${where}`;
+      preview = p.reason ? String(p.reason) : null;
+      dest = p.slug && p.action !== "banned" && p.action !== "removed" ? { kind: "community", slug: String(p.slug) } : { kind: "none" };
+      break;
+    }
+    case "session_live": {
+      const where = p.community ? String(p.community) : "your community";
+      title = `${where} started a live session`;
+      preview = p.title ? String(p.title) : null;
+      dest = p.code ? { kind: "session", code: String(p.code) } : { kind: "none" };
+      break;
+    }
+    case "moment_live": case "moment_soon": case "moment_reveal": case "moment_ended":
+    case "moment_answer": case "moment_challenge": case "moment_mod": {
+      const where = p.community ? String(p.community) : "your community";
+      const label = MOMENT_LABEL[String(p.type)] ?? "Moment";
+      preview = p.title ? String(p.title) : null;
+      dest = p.code ? { kind: "moment", code: String(p.code) } : { kind: "none" };
+      if (item.kind === "moment_live") title = `${label} is live in ${where}`;
+      else if (item.kind === "moment_soon") title = `${label} starts soon in ${where}`;
+      else if (item.kind === "moment_reveal") title = `The reveal has begun in ${where}`;
+      else if (item.kind === "moment_ended") title = p.type === "verdict" || p.type === "dept_war" ? `Results are in: ${label} in ${where}` : `${label} in ${where} has ended`;
+      else if (item.kind === "moment_answer") title = "Your Hot Seat question was answered";
+      else if (item.kind === "moment_challenge") title = `${where} challenged your community`;
+      else {
+        title = `A moderator ${p.action === "cancelled" ? "cancelled" : "ended"} your ${label}`;
+        if (p.reason) preview = String(p.reason);
+      }
+      break;
+    }
     case "system":
       title = p.title || "Anaija"; preview = p.body || null; break;
     default:
